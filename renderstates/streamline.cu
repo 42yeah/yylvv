@@ -1,0 +1,700 @@
+#include "streamline.cuh"
+#include <iostream>
+#include "../ui.cuh"
+#include "../utils.cuh"
+#include "../debug_kernels.cuh"
+#include <curand.h>
+#include <curand_kernel.h>
+#include <glm/gtc/constants.hpp>
+
+StreamLineRenderState::StreamLineRenderState() : num_seeds(200),
+        num_lines(8192),
+        simulation_dt(1.0f / 256.0f),
+        streamline_vao(nullptr),
+        streamline_program(nullptr),
+        streamline_graphics_resource(nullptr),
+        use_runge_kutta_4_integrator(false),
+        seeding_plane_x(0.0f),
+        adaptive_mode(false),
+        adaptive_explosion_radius(1.0f),
+        num_explosion(1),
+        explosion_cooldown_counter(10),
+        do_simplify(false)
+{
+
+}
+
+StreamLineRenderState::~StreamLineRenderState() 
+{
+
+}
+
+void StreamLineRenderState::initialize(YYLVVRes &res, UIRes &ui_res) {
+    std::cout << "Use 'R' to toggle runge-kutta 4 integrator." << std::endl;
+    std::cout << "Use 'T' to toggle adaptive mode." << std::endl;
+    std::cout << "Adaptive mode controls:" << std::endl
+        << "    O and P to control the seed explosion count." << std::endl
+        << "    [ and ] to control the explosion cooldown." << std::endl
+        << "    = and - to control the explosion radius." << std::endl;
+    std::cout << "Use '.' to toggle streamline simplification." << std::endl;
+
+    if (!allocate_graphics_resources()) {
+        std::cerr << "Faield to allocate graphics resources?" << std::endl;
+    }
+    if (!generate_streamlines(res, ui_res)) {
+        std::cerr << "Failed to generate streamlines?" << std::endl;
+    }
+}
+
+bool StreamLineRenderState::allocate_graphics_resources() {
+    std::cout << "Allocating streamline graphics resources." << std::endl;
+
+    // streamline memory view: (POS, COLOR); 6 floats; 24 bytes
+    // there will be num_seeds * num_lines streamlines, num_lines means how many line segments PER streamline
+    int num_vertices = (num_seeds * num_lines) * 2;
+    int num_floats = num_vertices * 6;
+    int size_in_bytes = num_floats * sizeof(float);
+    
+    std::cout << "Allocating " << size_in_bytes << " bytes for streamline." << std::endl;
+
+    std::unique_ptr<float[]> empty_data = std::make_unique<float[]>(num_floats);
+    streamline_vao = VAO::make_vao(empty_data.get(), size_in_bytes, GL_DYNAMIC_DRAW,
+                                   {
+                                       VertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, nullptr),
+                                       VertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void *) (sizeof(float) * 3))
+                                   },
+                                   GLDrawCall(GL_LINES, 0, num_vertices));
+    std::cout << "Linking OpenGL VAO with CUDA resource." << std::endl;
+    CHECK_CUDA_ERROR(cudaGraphicsGLRegisterBuffer(&streamline_graphics_resource, streamline_vao->vbo, cudaGraphicsMapFlagsNone));
+    streamline_program = Program::make_program("shaders/vectors.vert", "shaders/vectors.frag");
+    if (!streamline_program || !streamline_program->valid) 
+    {
+        std::cerr << "Invalid streamline program?" << std::endl;
+        return false;
+    }
+    return true;
+}
+
+void StreamLineRenderState::destroy() 
+{
+    std::cout << "Streamline is being destroyed. Good night." << std::endl;
+    CHECK_CUDA_ERROR(cudaGraphicsUnregisterResource(streamline_graphics_resource));
+    streamline_graphics_resource = nullptr;
+}
+
+void StreamLineRenderState::render(YYLVVRes &res, UIRes &ui_res) 
+{
+    streamline_program->use();
+    glUniformMatrix4fv(streamline_program->at("model"), 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
+    glUniformMatrix4fv(streamline_program->at("view"), 1, GL_FALSE, glm::value_ptr(ui_res.camera.view));
+    glUniformMatrix4fv(streamline_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(ui_res.camera.perspective));
+    streamline_vao->draw();
+}
+
+void StreamLineRenderState::process_events(YYLVVRes &res, UIRes &ui_res) 
+{
+    if (glfwGetKey(res.window, GLFW_KEY_UP))
+    {
+        seeding_plane_x += 10.0f * ui_res.delta_time;
+        generate_streamlines(res, ui_res);
+    }
+    if (glfwGetKey(res.window, GLFW_KEY_DOWN))
+    {
+        seeding_plane_x -= 10.0f * ui_res.delta_time;
+        generate_streamlines(res, ui_res);
+    }
+    if (glfwGetKey(res.window, GLFW_KEY_MINUS))
+    {
+        adaptive_explosion_radius -= 1.0f * ui_res.delta_time;
+        std::cout << "Current explosion radius: " << adaptive_explosion_radius << std::endl;
+        generate_streamlines(res, ui_res);
+    }
+    if (glfwGetKey(res.window, GLFW_KEY_EQUAL))
+    {
+        adaptive_explosion_radius += 1.0f * ui_res.delta_time;
+        std::cout << "Current explosion radius: " << adaptive_explosion_radius << std::endl;
+        generate_streamlines(res, ui_res);
+    }
+}
+
+void StreamLineRenderState::key_pressed(YYLVVRes &res, UIRes &ui_res, int key) 
+{
+    switch (key) 
+    {
+        case GLFW_KEY_R:
+        {
+            use_runge_kutta_4_integrator = !use_runge_kutta_4_integrator;
+            if (!generate_streamlines(res, ui_res))
+            {
+                std::cerr << "Failed to generate streamlines?" << std::endl;
+            }
+            break;
+        }
+
+        case GLFW_KEY_T:
+        {
+            adaptive_mode = !adaptive_mode;
+            if (!generate_streamlines(res, ui_res)) 
+            {
+                std::cerr << "Failed to generate streamlines?" << std::endl;
+            }
+            break;
+        }
+
+        case GLFW_KEY_O:
+        {
+            num_explosion--;
+            std::cout << "Seed explosion count: " << num_explosion << std::endl;
+            generate_streamlines(res, ui_res);
+            break;
+        }
+
+        case GLFW_KEY_P:
+        {
+            num_explosion++;
+            std::cout << "Seed explosion count: " << num_explosion << std::endl;
+            generate_streamlines(res, ui_res);
+            break;
+        }
+
+        case GLFW_KEY_LEFT_BRACKET:
+        {
+            explosion_cooldown_counter--;
+            std::cout << "Explosion cooldown counter: " << explosion_cooldown_counter << std::endl;
+            generate_streamlines(res, ui_res);
+            break;
+        }
+
+        case GLFW_KEY_RIGHT_BRACKET:
+        {
+            explosion_cooldown_counter++;
+            std::cout << "Explosion cooldown counter: " << explosion_cooldown_counter << std::endl;
+            generate_streamlines(res, ui_res);
+            break;
+        }
+
+        case GLFW_KEY_PERIOD:
+        {
+            do_simplify = !do_simplify;
+            if (do_simplify)
+            {
+                std::cout << "Streamline simplification is now ON." << std::endl;
+            }
+            else
+            {
+                std::cout << "Streamline simplification is now OFF." << std::endl;
+            }
+            generate_streamlines(res, ui_res);
+            break;
+        }
+    }
+}
+
+// generate seeds across y plane because that's what the original blog post does
+// TODO: add other ways to generate seed
+bool StreamLineRenderState::generate_seed_points(const BBox &bbox, int num_seeds) 
+{
+    seed_points.clear();
+    glm::vec3 step = glm::vec3(0.0f,
+                               (bbox.max - bbox.min).y / (num_seeds - 1),
+                               0.0f);
+    glm::vec3 current_seed = bbox.min + glm::vec3(0.1f, 0.1f, 0.1f);
+    current_seed.x += seeding_plane_x;
+    for (int i = 0; i < num_seeds; i++) 
+    {
+        seed_points.push_back(current_seed);
+        current_seed += step;
+    }
+    return true;
+}
+
+bool StreamLineRenderState::generate_streamlines(YYLVVRes &res, UIRes &ui_res) 
+{
+    if (adaptive_mode)
+    {
+        if (!trace_streamlines_adaptive(res, ui_res))
+        {
+            std::cerr << "Failed to adaptively trace streamlines?" << std::endl;
+        }
+    }
+    else // just generate streamlines as normal
+    {
+        if (!generate_seed_points(ui_res.delta_wing_bounding_box, num_seeds)) 
+        {
+            std::cerr << "Failed to generate seed points?" << std::endl;
+            return false;
+        }
+        if (!trace_streamlines(res, ui_res)) 
+        {
+            std::cerr << "Failed to trace streamlines?" << std::endl;
+            return false;
+        }
+    }
+    if (do_simplify)
+    {
+        if (!simplify_streamlines())
+        {
+            std::cout << "Failed to simplify streamlines?" << std::endl;
+        }
+    }
+
+    return true;
+}
+
+__device__ float4 euler_integrate(glm::vec3 p, float dt, CUDATexture3D vf) 
+{
+    float4 v = tex3D<float4>(vf.texture, p.x, p.y, p.z);
+    return make_float4(v.x * dt, v.y * dt, v.z * dt, v.w);
+}
+
+__device__ float4 runge_kutta_4_integrate(glm::vec3 p, float dt, CUDATexture3D vf) 
+{
+    float4 k1 = tex3D<float4>(vf.texture, p.x, p.y, p.z);
+    const float dt_half = 0.5f * dt;
+    float4 k2 = tex3D<float4>(vf.texture, p.x + dt_half * k1.x, p.y + dt_half * k1.y, p.z + dt_half * k1.z);
+    float4 k3 = tex3D<float4>(vf.texture, p.x + dt_half * k2.x, p.y + dt_half * k2.y, p.z + dt_half * k2.z);
+    float4 k4 = tex3D<float4>(vf.texture, p.x + dt * k3.x, p.y + dt * k3.y, p.z + dt * k3.z);
+
+    constexpr float one_over_six = 0.166666f;
+    return make_float4
+    (
+        one_over_six * dt * (k1.x + 2.0f * k2.x + 2.0f * k3.x + k4.x),
+        one_over_six * dt * (k1.y + 2.0f * k2.y + 2.0f * k3.y + k4.y),
+        one_over_six * dt * (k1.z + 2.0f * k2.z + 2.0f * k3.z + k4.z),
+        one_over_six * (k1.w + 2.0f * k2.w + 2.0f * k3.w + k4.w)
+    );
+}
+
+__device__ bool is_inside_bounding_box(const BBox &bbox, const glm::vec3 &p) 
+{
+    return (p.x > bbox.min.x && p.y > bbox.min.y && p.z > bbox.min.z && p.x < bbox.max.x && p.y < bbox.max.y && p.z < bbox.max.z);
+}
+
+__global__ void trace_streamlines_kernel(glm::vec3 *seed_points, int num_seeds, int num_lines, float *streamline_vbo_data, CUDATexture3D vf, float dt, cudaTextureObject_t vector_magnitude_ctf, BBox vf_bbox, bool use_rk4) 
+{
+    // streamline data: {POSITION, COLOR}
+    int index = blockIdx.y * gridDim.x + blockIdx.x;
+    int streamline_stride = num_lines * 2 * 6;
+
+    while (index < num_seeds) 
+    {
+        // seed point is located at seed_points[index]
+        glm::vec3 sp = seed_points[index];
+        int line_start = index * streamline_stride;
+
+        for (int i = 0; i < num_lines - 1; i++) 
+        {
+            if (!is_inside_bounding_box(vf_bbox, sp)) 
+            {
+                set_vec3(streamline_vbo_data, line_start + i * 12, glm::vec3(0.0f));
+                set_vec3(streamline_vbo_data, line_start + i * 12 + 6, glm::vec3(0.0f));
+                continue;
+            }
+
+            float4 dv = use_rk4 ? runge_kutta_4_integrate(sp, dt, vf) : euler_integrate(sp, dt, vf);
+            float4 color = tex1D<float4>(vector_magnitude_ctf, dv.w / vf.longest_vector * 4.0f + 0.5f);
+
+            set_vec3(streamline_vbo_data, line_start + i * 12, sp);
+            set_xyz(streamline_vbo_data, line_start + i * 12 + 3, color.x, color.y, color.z);
+            
+            sp.x += dv.x;
+            sp.y += dv.y;
+            sp.z += dv.z;
+
+            set_vec3(streamline_vbo_data, line_start + i * 12 + 6, sp);
+            set_xyz(streamline_vbo_data, line_start + i * 12 + 9, color.x, color.y, color.z);
+        }
+
+        index += gridDim.x * gridDim.y;
+    }
+}
+
+bool StreamLineRenderState::trace_streamlines(YYLVVRes &res, UIRes &ui_res) 
+{
+    int num_blocks_x = 32;
+    int num_blocks_y = (seed_points.size() + (num_blocks_x - 1)) / num_blocks_x;
+    std::cout << "Trace report: parallel blocks: (" << num_blocks_x << ", " << num_blocks_y << ")" << std::endl;
+    dim3 num_blocks(num_blocks_x, num_blocks_y, 1);
+
+    float *vbo_data;
+    size_t mapped_size;
+    CHECK_CUDA_ERROR(cudaGraphicsMapResources(1, &streamline_graphics_resource));
+    CHECK_CUDA_ERROR(cudaGraphicsResourceGetMappedPointer((void **) &vbo_data, &mapped_size, streamline_graphics_resource));
+
+    glm::vec3 *seed_points_cuda;
+    size_t seed_points_size = sizeof(glm::vec3) * seed_points.size();
+    CHECK_CUDA_ERROR(cudaMalloc(&seed_points_cuda, seed_points_size));
+    CHECK_CUDA_ERROR(cudaMemcpy(seed_points_cuda, seed_points.data(), seed_points_size, cudaMemcpyHostToDevice));
+
+    assert(seed_points.size() == num_seeds);
+    trace_streamlines_kernel<<<num_blocks, 1>>>(seed_points_cuda, num_seeds, num_lines, vbo_data, res.vf_tex, simulation_dt, ui_res.ctf_tex_cuda, ui_res.delta_wing_bounding_box, use_runge_kutta_4_integrator);
+
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
+    CHECK_CUDA_ERROR(cudaGraphicsUnmapResources(1, &streamline_graphics_resource));
+    CHECK_CUDA_ERROR(cudaFree(seed_points_cuda));
+
+    return true;
+}
+
+__device__ glm::vec3 evaluate_vector_delta(const glm::vec3 &p, CUDATexture3D vf)
+{
+    constexpr float epsilon = 0.01f;
+    constexpr float one_over_eps = 1.0f / epsilon;
+    
+    float4 v = tex3D<float4>(vf.texture, p.x, p.y, p.z);
+    float4 vx = tex3D<float4>(vf.texture, p.x - epsilon, p.y, p.z);
+    float4 vy = tex3D<float4>(vf.texture, p.x, p.y - epsilon, p.z);
+    float4 vz = tex3D<float4>(vf.texture, p.x, p.y, p.z - epsilon);
+
+    return one_over_eps * glm::vec3(v.x - vx.x, v.y - vy.y, v.z - vz.z);
+}
+
+__device__ glm::vec3 evaluate_vector_delta_delta(const glm::vec3 &p, CUDATexture3D vf)
+{
+    constexpr float epsilon = 0.01f;
+    constexpr float one_over_eps = 1.0f / epsilon;
+
+    glm::vec3 dv = evaluate_vector_delta(p, vf);
+    glm::vec3 dvx = evaluate_vector_delta(p - glm::vec3(epsilon, 0.0f, 0.0f), vf);
+    glm::vec3 dvy = evaluate_vector_delta(p - glm::vec3(0.0f, epsilon, 0.0f), vf);
+    glm::vec3 dvz = evaluate_vector_delta(p - glm::vec3(0.0f, 0.0f, epsilon), vf);
+    
+    return one_over_eps * glm::vec3(dv.x - dvx.x, dv.y - dvy.y, dv.z - dvz.z);
+}
+
+__device__ float curvature(const glm::vec3 &p, CUDATexture3D vf)
+{
+    glm::vec3 dv = evaluate_vector_delta(p, vf);
+    glm::vec3 ddv = evaluate_vector_delta_delta(p, vf);
+    return glm::length(glm::cross(dv, ddv)) / powf(glm::length(dv), 3);
+}
+
+
+struct TraceInfo
+{
+    int index;
+    float maximum_metric;
+    float average_metric;
+    float curand;
+    int streamline_size;
+    float streamline_length;
+    float streamline_dist;
+    float global_distortion;
+};
+
+__global__ void trace_and_generate_kernel(glm::vec3 *seed_points, 
+                                          int *num_current_seeds,
+                                          int num_maximum_seeds, 
+                                          int num_lines,
+                                          int trace_start,
+                                          int trace_end,
+                                          float *streamline_vbo_data, 
+                                          CUDATexture3D vf, 
+                                          float dt, 
+                                          cudaTextureObject_t vector_magnitude_ctf, 
+                                          BBox vf_bbox, 
+                                          bool use_rk4,
+                                          float threshold,
+                                          float explosion_radius,
+                                          int num_explosion,
+                                          int explosion_cooldown_counter,
+                                          TraceInfo *debug)
+{
+    int index = blockIdx.y * gridDim.x + blockIdx.x + trace_start;
+    int streamline_stride = num_lines * 2 * 6;
+
+    curandState curand_state;
+    curand_init(1337, index, 0, &curand_state);
+
+    while (index <= trace_end) 
+    {
+        // seed point is located at seed_points[index]
+        glm::vec3 sp = seed_points[index];
+        int line_start = index * streamline_stride;
+
+        int explosion_cooldown = 0;
+
+        // Debug info
+        float maximum_metric = 0.0f;
+        float average_metric = 0.0f;
+
+        for (int i = 0; i < num_lines - 1; i++) 
+        {
+            if (!is_inside_bounding_box(vf_bbox, sp)) 
+            {
+                set_vec3(streamline_vbo_data, line_start + i * 12, glm::vec3(0.0f));
+                set_vec3(streamline_vbo_data, line_start + i * 12 + 6, glm::vec3(0.0f));
+                continue;
+            }
+
+            float4 dv = use_rk4 ? runge_kutta_4_integrate(sp, dt, vf) : euler_integrate(sp, dt, vf);
+            float4 color = tex1D<float4>(vector_magnitude_ctf, dv.w / vf.longest_vector * 4.0f + 0.5f);
+
+            set_vec3(streamline_vbo_data, line_start + i * 12, sp);
+            set_xyz(streamline_vbo_data, line_start + i * 12 + 3, color.x, color.y, color.z);
+            
+            sp.x += dv.x;
+            sp.y += dv.y;
+            sp.z += dv.z;
+
+            set_vec3(streamline_vbo_data, line_start + i * 12 + 6, sp);
+            set_xyz(streamline_vbo_data, line_start + i * 12 + 9, color.x, color.y, color.z);
+
+            float metric = glm::length(evaluate_vector_delta(sp, vf));
+            maximum_metric = glm::max(metric, maximum_metric);
+            average_metric += metric;
+
+            if (metric > threshold && explosion_cooldown == 0)
+            {
+                // Generate a seed point directly above the current sample point
+                int new_seed_point_index = atomicAdd(num_current_seeds, num_explosion);
+                explosion_cooldown = explosion_cooldown_counter;
+
+                if (new_seed_point_index >= num_maximum_seeds)
+                {
+                    atomicAdd(num_current_seeds, -num_explosion);
+                    continue;
+                }
+
+                for (int j = 0; j < glm::min(num_maximum_seeds - new_seed_point_index, num_explosion); j++)
+                {
+                    float theta = 2.0f * glm::pi<float>() * curand_uniform(&curand_state);
+                    float phi = acosf(1.0f - 2.0f * curand_uniform(&curand_state));
+                    glm::vec3 offset_dir(sinf(phi) * cosf(theta), sinf(phi) * sinf(theta), cosf(phi));
+                    seed_points[new_seed_point_index + j] = sp + offset_dir * explosion_radius;
+                }
+            }
+        }
+
+        // Debug content
+        // average_metric /= (num_lines - 1);
+        // debug[index].index = index;
+        // debug[index].maximum_metric = maximum_metric;
+        // debug[index].average_metric = average_metric;
+        // debug[index].curand = curand_uniform(&curand_state);
+
+        index += gridDim.x * gridDim.y;
+    }
+}
+
+bool StreamLineRenderState::trace_streamlines_adaptive(YYLVVRes &res, UIRes &ui_res)
+{
+    // 1. Generate n/2 initial seeds
+    int n_initial_seeds = num_seeds / 2;
+    if (!generate_seed_points(ui_res.delta_wing_bounding_box, n_initial_seeds))
+    {
+        std::cerr << "Failed to generate initial adaptive seed points?" << std::endl;
+        return false;
+    }
+
+    glm::vec3 *seed_points_cuda;
+    int *num_seeds_cuda;
+
+    // Allocate maximum amount of seeds
+    CHECK_CUDA_ERROR(cudaMalloc(&seed_points_cuda, num_seeds * sizeof(glm::vec3)));
+    CHECK_CUDA_ERROR(cudaMemcpy(seed_points_cuda, seed_points.data(), n_initial_seeds * sizeof(glm::vec3), cudaMemcpyHostToDevice));
+    CHECK_CUDA_ERROR(cudaMalloc(&num_seeds_cuda, sizeof(int)));
+    CHECK_CUDA_ERROR(cudaMemcpy(num_seeds_cuda, &n_initial_seeds, sizeof(int), cudaMemcpyHostToDevice));
+
+    // Allocate debug stuffs
+    TraceInfo *debug;
+    CHECK_CUDA_ERROR(cudaMalloc(&debug, num_seeds * sizeof(TraceInfo)));
+    CHECK_CUDA_ERROR(cudaMemset(debug, 0, num_seeds * sizeof(TraceInfo)));
+
+    float *vbo_data;
+    size_t mapped_size;
+    CHECK_CUDA_ERROR(cudaGraphicsMapResources(1, &streamline_graphics_resource));
+    CHECK_CUDA_ERROR(cudaGraphicsResourceGetMappedPointer((void **) &vbo_data, &mapped_size, streamline_graphics_resource));
+    // Clean the lines
+    CHECK_CUDA_ERROR(cudaMemset(vbo_data, 0, mapped_size));
+
+    int trace_start = 0;
+    int trace_end = n_initial_seeds - 1;
+    
+    while (access_data_on_device(num_seeds_cuda, 0) < num_seeds)
+    {
+        int num_trace = trace_end - trace_start + 1;
+        int num_blocks_x = 32;
+        int num_blocks_y = (num_trace + (num_blocks_x - 1)) / num_blocks_x;
+        // std::cout << "Adaptive trace report: parallel blocks: (" << num_blocks_x << ", " << num_blocks_y << ")" << std::endl;
+        std::cout << "Adaptive trace report: " << trace_start << " to " << trace_end << std::endl;
+
+        dim3 num_blocks(num_blocks_x, num_blocks_y, 1);
+
+        constexpr float seed_point_threshold = 10.0f;
+        trace_and_generate_kernel<<<num_blocks, 1>>>(seed_points_cuda, num_seeds_cuda, num_seeds, num_lines, 
+            trace_start, trace_end,
+            vbo_data, res.vf_tex, simulation_dt, ui_res.ctf_tex_cuda, ui_res.delta_wing_bounding_box,
+            use_runge_kutta_4_integrator, seed_point_threshold, adaptive_explosion_radius, num_explosion,
+            explosion_cooldown_counter, debug);
+
+        CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
+        // After tracing, num_seeds_cuda should be changed; now we trace from (trace_start + trace_size) to num_seeds_cuda
+        // Stopping strategy:
+        // 1. No new seed points are generated;
+        // 2. Maximum number of seed points are exceeded.
+        trace_start = trace_end + 1;
+        trace_end = access_data_on_device(num_seeds_cuda, 0) - 1;
+
+        if (trace_start > trace_end)
+        {
+            std::cout << "Trace has ended because no new seed points can be generated." << std::endl;
+            break;
+        }
+    }
+    if (trace_start <= trace_end)
+    {
+        // Trace the rest
+        trace_end = num_seeds - 1;
+        int num_trace = trace_end - trace_start + 1;
+        int num_blocks_x = 32;
+        int num_blocks_y = (num_trace + (num_blocks_x - 1)) / num_blocks_x;
+        std::cout << "Adaptive trace report: " << trace_start << " to " << trace_end << std::endl;
+        dim3 num_blocks(num_blocks_x, num_blocks_y, 1);
+        constexpr float seed_point_threshold = 10.0f;
+        trace_and_generate_kernel<<<num_blocks, 1>>>(seed_points_cuda, num_seeds_cuda, num_seeds, num_lines, 
+            trace_start, trace_end,
+            vbo_data, res.vf_tex, simulation_dt, ui_res.ctf_tex_cuda, ui_res.delta_wing_bounding_box,
+            use_runge_kutta_4_integrator, seed_point_threshold, adaptive_explosion_radius, num_explosion,
+            explosion_cooldown_counter, debug);
+        CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+    }
+
+    // Unload seed points back to CPU (to debug)
+    // num_seeds_cuda would've been somehow changed
+    int final_num_seeds = glm::min(200, access_data_on_device(num_seeds_cuda, 0));
+    glm::vec3 *sp_host = new glm::vec3[final_num_seeds];
+    CHECK_CUDA_ERROR(cudaMemcpy(sp_host, seed_points_cuda, final_num_seeds * sizeof(glm::vec3), cudaMemcpyDeviceToHost));
+
+    // Push back the rest back to seed_points
+    for (int i = n_initial_seeds; i < final_num_seeds; i++)
+    {
+        const glm::vec3 &p = sp_host[i];
+        seed_points.push_back(sp_host[i]);
+        // std::cout << "EXTRA SEED: " << p.x << ", " << p.y << ", " << p.z << std::endl;
+    }
+    std::cout << "Adaptive trace report: " << (final_num_seeds - n_initial_seeds) << " new seeds." << std::endl;
+
+    TraceInfo *debug_host = new TraceInfo[num_seeds];
+    CHECK_CUDA_ERROR(cudaMemcpy(debug_host, debug, num_seeds * sizeof(TraceInfo), cudaMemcpyDeviceToHost));
+
+    // TODO: add/print debug stuffs here...
+
+    delete[] sp_host;
+    delete[] debug_host;
+    CHECK_CUDA_ERROR(cudaFree(seed_points_cuda));
+    CHECK_CUDA_ERROR(cudaFree(num_seeds_cuda));
+    CHECK_CUDA_ERROR(cudaFree(debug));
+    CHECK_CUDA_ERROR(cudaGraphicsUnmapResources(1, &streamline_graphics_resource));
+    
+    return true;
+}
+
+__global__ void simplify_streamlines_kernel(int num_streamlines, int num_lines, float *streamline_vbo_data, float distortion_threshold, TraceInfo *debug)
+{
+    int index = blockIdx.y * gridDim.x + blockIdx.x;
+    int streamline_stride = num_lines * 2 * 6;
+
+    while (index < num_streamlines)
+    {
+        // Memory layout: (POS, COLOR) * 8192
+        int start = index * streamline_stride;
+        int size = -1;
+        float streamline_length = 0.0f;
+
+        // Not every streamline ends at 8192; they must end somewhere in between
+        for (int i = 0; i < num_lines; i++)
+        {
+            float *vertex = &streamline_vbo_data[start + 12 * i];
+            if (vertex[0] == 0.0f && vertex[1] == 0.0f && vertex[2] == 0.0f && 
+                vertex[6] == 0.0f && vertex[7] == 0.0f && vertex[8] == 0.0f)
+            {
+                size = i;
+                break;
+            }
+            streamline_length += sqrtf(powf(vertex[6] - vertex[0], 2) + powf(vertex[7] - vertex[1], 2) + powf(vertex[8] - vertex[2], 2));
+        }
+
+        if (size == -1)
+        {
+            size = num_lines;
+        }
+
+        // 1. Calculate streamline T(L)
+        float *start_vertex = &streamline_vbo_data[start + 12];
+        float *end_vertex = &streamline_vbo_data[start + 12 * (size - 1)];
+        float streamline_dist = sqrtf(powf(end_vertex[6] - start_vertex[0], 2) + powf(end_vertex[7] - start_vertex[1], 2) + powf(end_vertex[8] - start_vertex[2], 2));
+        float global_distortion = streamline_dist == 0.0f ? 0.0f : streamline_length / streamline_dist;
+
+        debug[index].streamline_size = size;
+        debug[index].streamline_length = streamline_length;
+        debug[index].streamline_dist = streamline_dist;
+        debug[index].global_distortion = global_distortion;
+
+        if (size == 0)
+        {
+            // There is no need to simplify a zero length streamline
+            index += gridDim.x * gridDim.y;
+            continue;
+        }
+
+        // 2. Filter according to T(L) value
+        if (global_distortion < distortion_threshold)
+        {
+            // Zero out the whole thing
+            for (int i = 0; i < num_lines; i++)
+            {
+                float *vertex = &streamline_vbo_data[start + 12 * i];
+                memset(vertex, 0, sizeof(float) * 12);
+            }
+        }
+
+        index += gridDim.x * gridDim.y;
+    }
+}
+
+bool StreamLineRenderState::simplify_streamlines()
+{
+    // Simplify streamlines according to, and I quote, "streamline importance".
+    int num_streamlines = seed_points.size();
+    int num_blocks_x = 32;
+    int num_blocks_y = (num_streamlines + (num_blocks_x - 1)) / num_blocks_x;
+
+    float *vbo_data;
+    size_t mapped_size;
+    CHECK_CUDA_ERROR(cudaGraphicsMapResources(1, &streamline_graphics_resource));
+    CHECK_CUDA_ERROR(cudaGraphicsResourceGetMappedPointer((void **) &vbo_data, &mapped_size, streamline_graphics_resource));
+
+    // Debug info
+    TraceInfo *debug;
+    CHECK_CUDA_ERROR(cudaMalloc(&debug, num_streamlines * sizeof(TraceInfo)));
+    CHECK_CUDA_ERROR(cudaMemset(debug, 0, num_streamlines * sizeof(TraceInfo)));
+
+    dim3 num_blocks(num_blocks_x, num_blocks_y, 1);
+    simplify_streamlines_kernel<<<num_blocks, 1>>>(num_streamlines, num_lines, vbo_data, 1.01f, debug);
+
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+    CHECK_CUDA_ERROR(cudaGraphicsUnmapResources(1, &streamline_graphics_resource));
+
+    TraceInfo *debug_host = new TraceInfo[num_seeds];
+    CHECK_CUDA_ERROR(cudaMemcpy(debug_host, debug, num_seeds * sizeof(TraceInfo), cudaMemcpyDeviceToHost));
+
+    float max_distortion = 0.0f;
+    float avg_distortion = 0.0f;
+    for (int i = 0; i < num_streamlines; i++)
+    {
+        // std::cout << i << ": " << debug_host[i].streamline_size << ", " << debug_host[i].streamline_length << ", " << debug_host[i].streamline_dist << std::endl;
+        TraceInfo &info = debug_host[i];
+        max_distortion = glm::max(max_distortion, info.global_distortion);
+        avg_distortion += info.global_distortion;
+    }
+    avg_distortion /= num_streamlines;
+    std::cout << "Max distortion: " << max_distortion << ", average: " << avg_distortion << std::endl;
+
+    delete[] debug_host;
+    CHECK_CUDA_ERROR(cudaFree(debug));
+        
+    return true;
+}

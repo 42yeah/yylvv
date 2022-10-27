@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.19.0)
 project(yylvv_2_0 CUDA CXX)
 
 # source files
-set(yylvv_2_0_SRC main.cu glad/src/glad.c VAO.cpp Program.cpp Camera.cpp renderstates/lineglyph.cu renderstates/arrowglyph.cu debug_kernels.cu renderstates/streamline.cu)
+set(yylvv_2_0_SRC main.cu glad/src/glad.c VAO.cpp Program.cpp Camera.cpp renderstates/lineglyph.cu renderstates/arrowglyph.cu debug_kernels.cu renderstates/streamline.cu app.cu)
 set_source_files_properties(${yylvv_2_0_SRC} PROPERTIES LANGUAGE CUDA)
 
 set(CMAKE_CXX_STANDARD 17)

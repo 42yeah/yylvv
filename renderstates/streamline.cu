@@ -676,7 +676,6 @@ bool StreamLineRenderState::simplify_streamlines()
     simplify_streamlines_kernel<<<num_blocks, 1>>>(num_streamlines, num_lines, vbo_data, 1.01f, debug);
 
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
-    CHECK_CUDA_ERROR(cudaGraphicsUnmapResources(1, &streamline_graphics_resource));
 
     TraceInfo *debug_host = new TraceInfo[num_seeds];
     CHECK_CUDA_ERROR(cudaMemcpy(debug_host, debug, num_seeds * sizeof(TraceInfo), cudaMemcpyDeviceToHost));
@@ -694,6 +693,7 @@ bool StreamLineRenderState::simplify_streamlines()
     std::cout << "Max distortion: " << max_distortion << ", average: " << avg_distortion << std::endl;
 
     delete[] debug_host;
+    CHECK_CUDA_ERROR(cudaGraphicsUnmapResources(1, &streamline_graphics_resource));
     CHECK_CUDA_ERROR(cudaFree(debug));
         
     return true;

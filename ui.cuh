@@ -2,8 +2,8 @@
 #define YYLVV_UI_CUH
 
 #include <iostream>
-#include <GLFW/glfw3.h>
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include "yylvv.cuh"
 #include "VAO.h"
 #include "Program.h"
@@ -308,7 +308,6 @@ void start_ui(YYLVVRes &res) {
         std::cerr << "Cannot cleanup UI resources?" << std::endl;
     }
 }
-
 
 bool cleanup_ui_resources(UIRes &res) {
     std::cout << "Cleaning up UI resources..." << std::endl;

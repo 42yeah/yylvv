@@ -27,6 +27,9 @@ App::~App()
     {
         render_state->destroy();
     }
+
+    std::cout << "Destroying the rest of the app..." << std::endl;
+    
     CHECK_CUDA_ERROR(cudaDestroyTextureObject(ctf_tex_cuda));
     CHECK_CUDA_ERROR(cudaFreeArray(ctf_data_cuda));
 

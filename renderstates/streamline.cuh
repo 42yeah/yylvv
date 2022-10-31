@@ -43,13 +43,13 @@ private:
     bool adaptive_mode;
 
     // adaptive mode streamline variables
-    int num_seeds_adaptive;
     float adaptive_explosion_radius;
     int num_explosion;
     int explosion_cooldown_counter;
 
     // streamline simplification
     bool do_simplify;
+    float distortion_threshold;
 };
 
 #endif

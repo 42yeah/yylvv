@@ -3,6 +3,7 @@
 #include "../app.cuh"
 #include "../utils.cuh"
 #include "../debug_kernels.cuh"
+#include <imgui.h>
 #include <curand.h>
 #include <curand_kernel.h>
 #include <cuda_runtime.h>
@@ -22,7 +23,8 @@ StreamLineRenderState::StreamLineRenderState() : num_seeds(200),
         adaptive_explosion_radius(1.0f),
         num_explosion(1),
         explosion_cooldown_counter(10),
-        do_simplify(false)
+        do_simplify(false),
+        distortion_threshold(1.01f)
 {
 
 }
@@ -676,7 +678,7 @@ bool StreamLineRenderState::simplify_streamlines()
     CHECK_CUDA_ERROR(cudaMemset(debug, 0, num_streamlines * sizeof(TraceInfo)));
 
     dim3 num_blocks(num_blocks_x, num_blocks_y, 1);
-    simplify_streamlines_kernel<<<num_blocks, 1>>>(num_streamlines, num_lines, vbo_data, 1.01f, debug);
+    simplify_streamlines_kernel<<<num_blocks, 1>>>(num_streamlines, num_lines, vbo_data, distortion_threshold, debug);
 
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
@@ -705,5 +707,48 @@ bool StreamLineRenderState::simplify_streamlines()
 
 void StreamLineRenderState::draw_user_controls(App &app)
 {
+    ImGui::SetNextWindowPos({(float) app.screen_width - 200.0f, 0.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({200, 400}, ImGuiCond_FirstUseEver);
+    
+    bool should_update = false;
 
+    if (ImGui::Begin("Streamline Controls"))
+    {
+        should_update |= ImGui::SliderFloat("Simulation delta time", &simulation_dt, 0.001f, 1.0f);
+        if (ImGui::Button("Reset"))
+        {
+            simulation_dt = 1.0f / 256.0f;
+            should_update = true;
+        }
+        should_update |= ImGui::SliderFloat("Seeding plane (X axis)", &seeding_plane_x, 0.0f, app.res.vf_tex.extent.width);
+        should_update |= ImGui::Checkbox("Use Runge-Kutta 4 integrator", &use_runge_kutta_4_integrator);
+        should_update |= ImGui::Checkbox("Adaptive seeding", &adaptive_mode);
+
+        if (adaptive_mode)
+        {
+            if (ImGui::CollapsingHeader("Adaptive mode properties"))
+            {
+                should_update |= ImGui::SliderFloat("Adaptive explosion radius", &adaptive_explosion_radius, 1.0f, 20.0f);
+                should_update |= ImGui::SliderInt("Number of explosions", &num_explosion, 1, 10);
+                should_update |= ImGui::SliderInt("Explosion cooldown counter", &explosion_cooldown_counter, 1, 200);
+            }
+        }
+
+        should_update |= ImGui::Checkbox("Streamline simplification", &do_simplify);
+        if (do_simplify)
+        {
+            if (ImGui::CollapsingHeader("Simplification properties"))
+            {
+                should_update |= ImGui::SliderFloat("Simplification threshold", &distortion_threshold, 1.001f, 1.5f);
+            }
+        }
+        
+    }
+
+    ImGui::End();
+
+    if (should_update)
+    {
+        generate_streamlines(app);
+    }
 }

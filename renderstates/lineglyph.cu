@@ -1,5 +1,6 @@
 #include "lineglyph.cuh"
 #include <vector>
+#include <imgui.h>
 #include "../debug_kernels.cuh"
 #include "../utils.cuh"
 #include "../app.cuh"
@@ -182,4 +183,46 @@ bool LineGlyphRenderState::generate_line_glyphs(App &app, float z)
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
     CHECK_CUDA_ERROR(cudaGraphicsUnmapResources(1, &line_glyph_graphics_resource));
     return true;
+}
+
+void LineGlyphRenderState::draw_user_controls(App &app)
+{
+    ImGui::SetNextWindowPos({(float) app.screen_width - 200.0f, 0.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({200, 400}, ImGuiCond_FirstUseEver);
+    
+    bool should_update = false;
+
+    if (ImGui::Begin("Line Glyph Controls"))
+    {
+        float cap = (visualize_xy ? app.res.vf_tex.extent.depth : app.res.vf_tex.extent.width);
+
+        should_update |= ImGui::SliderFloat("Vector length", &vector_length, 1.0f, 5.0f);
+        should_update |= ImGui::SliderFloat("Visualizing plane", &current_visualizing_z, 0.0f, cap);
+
+        ImGui::Text("Visualizing plane");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::BeginListBox("plane"))
+        {
+            if (ImGui::Selectable("X-Y plane", visualize_xy))
+            {
+                visualize_xy = true;
+                should_update = true;
+                clamp_visualizing_z(app);
+            }
+            if (ImGui::Selectable("Y-Z plane", !visualize_xy))
+            {
+                visualize_xy = false;
+                should_update = true;
+                clamp_visualizing_z(app);
+            }
+            ImGui::EndListBox();
+        }
+    }
+
+    if (should_update)
+    {
+        generate_line_glyphs(app, current_visualizing_z);
+    }
+
+    ImGui::End();
 }

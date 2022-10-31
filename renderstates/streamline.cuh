@@ -18,6 +18,7 @@ public:
     virtual void render(App &app) override;
     virtual void process_events(App &app) override;
     virtual void key_pressed(App &app, int key) override;
+    virtual void draw_user_controls(App &app) override;
 
 private:
     bool allocate_graphics_resources();

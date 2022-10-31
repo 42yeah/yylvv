@@ -574,8 +574,8 @@ bool StreamLineRenderState::trace_streamlines_adaptive(App &app)
     // Push back the rest back to seed_points
     for (int i = n_initial_seeds; i < final_num_seeds; i++)
     {
-        const glm::vec3 &p = sp_host[i];
         seed_points.push_back(sp_host[i]);
+        // const glm::vec3 &p = sp_host[i];
         // std::cout << "EXTRA SEED: " << p.x << ", " << p.y << ", " << p.z << std::endl;
     }
     std::cout << "Adaptive trace report: " << (final_num_seeds - n_initial_seeds) << " new seeds." << std::endl;
@@ -700,4 +700,10 @@ bool StreamLineRenderState::simplify_streamlines()
     CHECK_CUDA_ERROR(cudaFree(debug));
         
     return true;
+}
+
+
+void StreamLineRenderState::draw_user_controls(App &app)
+{
+
 }

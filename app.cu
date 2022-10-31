@@ -1,12 +1,17 @@
 #include "app.cuh"
 #include <glm/gtc/type_ptr.hpp>
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
 
 // For GLFW stuffs
 App *bound_app = nullptr;
 
 App::App(YYLVVRes &res) : res(res),
     window(res.window),
-    valid(false)
+    valid(false),
+    user_interface_mode(false),
+    visualization_mode(0)
 {
     if (!init())
     {
@@ -18,11 +23,16 @@ App::App(YYLVVRes &res) : res(res),
 
 App::~App()
 {
-    if (render_state) {
+    if (render_state) 
+    {
         render_state->destroy();
     }
     CHECK_CUDA_ERROR(cudaDestroyTextureObject(ctf_tex_cuda));
     CHECK_CUDA_ERROR(cudaFreeArray(ctf_data_cuda));
+
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
 }
 
 bool App::init()
@@ -139,6 +149,16 @@ bool App::init()
 
     align_camera();
 
+    // Setup ImGui
+    ImGui::CreateContext();
+    ImGuiIO &io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+
+    ImGui::StyleColorsDark();
+
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330 core");
+
     return true;
 }
 
@@ -156,10 +176,19 @@ void App::cursor_pos_callback_glfw(GLFWwindow *window, double xpos, double ypos)
 
 void App::key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
-    if (action != 1) {
+    if (action != 1) 
+    {
         return;
     }
-    switch (key) {
+
+    if (user_interface_mode && key == GLFW_KEY_SPACE)
+    {
+        set_user_interface_mode(false);
+        return;
+    }
+
+    switch (key) 
+    {
         case GLFW_KEY_L:
             switch_state(std::make_shared<LineGlyphRenderState>());
             break;
@@ -171,8 +200,14 @@ void App::key_callback(GLFWwindow *window, int key, int scancode, int action, in
         case GLFW_KEY_Z:
             switch_state(std::make_shared<StreamLineRenderState>());
             break;
+
+        case GLFW_KEY_SPACE:
+            set_user_interface_mode(!user_interface_mode);
+            break;
     }
-    if (render_state) {
+
+    if (render_state) 
+    {
         render_state->key_pressed(*this, key);
     }
 }
@@ -181,10 +216,13 @@ void App::cursor_pos_callback(GLFWwindow *window, double xpos, double ypos)
 {
     ypos = -ypos;
     xpos = -xpos;
-    if (!camera.prev_cursor_pos) {
+    
+    if (!camera.prev_cursor_pos || user_interface_mode) 
+    {
         camera.prev_cursor_pos = glm::dvec2(xpos, ypos);
         return;
     }
+
     glm::dvec2 curr_pos = glm::dvec2(xpos, ypos);
     glm::dvec2 delta_pos = curr_pos - *camera.prev_cursor_pos;
     camera.yaw += delta_pos.x * camera.sensitivity;
@@ -207,6 +245,11 @@ void App::align_camera()
 
 void App::handle_continuous_key_events()
 {
+    if (user_interface_mode)
+    {
+        return;
+    }
+
     if (glfwGetKey(window, GLFW_KEY_W)) 
     {
         camera.eye += camera.front * camera.speed * delta_time;
@@ -233,6 +276,11 @@ void App::loop()
 {
     while (!glfwWindowShouldClose(window)) 
     {
+        if (!valid)
+        {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+
         bound_app = this;
         glfwPollEvents();
 
@@ -254,6 +302,22 @@ void App::loop()
         if (render_state) 
         {
             render_state->render(*this);
+        }
+
+        if (user_interface_mode)
+        {
+            ImGui_ImplOpenGL3_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+
+            draw_user_controls();
+            if (render_state)
+            {
+                render_state->draw_user_controls(*this);
+            }
+
+            ImGui::Render();
+            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         }
 
         glfwSwapBuffers(window);
@@ -281,9 +345,89 @@ void App::draw_delta_wing() const
 
 void App::switch_state(std::shared_ptr<RenderState> new_state)
 {
-    if (render_state != nullptr) {
+    if (render_state != nullptr) 
+    {
         render_state->destroy();
     }
+    
     render_state = new_state;
-    render_state->initialize(*this);
+    if (new_state)
+    {
+        render_state->initialize(*this);    
+    }
+}
+
+void App::draw_user_controls()
+{
+    static std::vector<std::string> supported = 
+    {
+        "No visualizations",
+        "Line glyphs",
+        "Arrow glyphs",
+        "Streamlines"
+    };
+
+    ImGui::SetNextWindowPos({0, 0}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({220, 200}, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Streamline Visualizations"))
+    {
+        ImGui::Text("Visualization mode");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::BeginListBox("Streamline Visualizations List"))
+        {
+            for (int i = 0; i < supported.size(); i++)
+            {
+                bool is_selected = visualization_mode == i;
+
+                if (ImGui::Selectable(supported[i].c_str(), is_selected))
+                {
+                    visualization_mode = i;
+                    switch (visualization_mode)
+                    {
+                        case 0:
+                            switch_state(nullptr);
+                            break;
+
+                        case 1:
+                            switch_state(std::make_shared<LineGlyphRenderState>());
+                            break;
+
+                        case 2:
+                            switch_state(std::make_shared<ArrowGlyphRenderState>());
+                            break;
+
+                        case 3:
+                            switch_state(std::make_shared<StreamLineRenderState>());
+                            break;
+                    }
+                }
+
+                if (is_selected)
+                {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndListBox();
+        }
+    }
+    ImGui::End();
+
+    // TODO: maybe add a camera control as well?
+
+    ImGui::ShowDemoWindow();
+}
+
+void App::set_user_interface_mode(bool new_ui_mode)
+{
+    user_interface_mode = new_ui_mode;
+
+    if (new_ui_mode)
+    {
+        // Stop capturing cursor and stop camera motion
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
+    else
+    {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    }
 }

@@ -44,6 +44,10 @@ private:
 
     void switch_state(std::shared_ptr<RenderState> new_state);
 
+    // User controls
+    void draw_user_controls();
+    void set_user_interface_mode(bool new_ui_mode);
+
 public:
     YYLVVRes &res;
     GLFWwindow *window;
@@ -66,6 +70,10 @@ public:
     // color transfer function texture
     cudaArray_t ctf_data_cuda;
     cudaTextureObject_t ctf_tex_cuda;
+
+    // UI controls
+    bool user_interface_mode;
+    int visualization_mode;
 };
 
 #endif // APP_CUH

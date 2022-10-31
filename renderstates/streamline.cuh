@@ -13,19 +13,19 @@ public:
     StreamLineRenderState();
     ~StreamLineRenderState();
 
-    virtual void initialize(YYLVVRes &res, UIRes &ui_res) override;
+    virtual void initialize(App &app) override;
     virtual void destroy() override;
-    virtual void render(YYLVVRes &res, UIRes &ui_res) override;
-    virtual void process_events(YYLVVRes &res, UIRes &ui_res) override;
-    virtual void key_pressed(YYLVVRes &res, UIRes &ui_res, int key) override;
+    virtual void render(App &app) override;
+    virtual void process_events(App &app) override;
+    virtual void key_pressed(App &app, int key) override;
 
 private:
     bool allocate_graphics_resources();
-    bool generate_streamlines(YYLVVRes &res, UIRes &ui_res);
+    bool generate_streamlines(App &app);
     bool generate_seed_points(const BBox &bbox, int num_seeds);
-    bool trace_streamlines(YYLVVRes &res, UIRes &ui_res);
+    bool trace_streamlines(App &app);
 
-    bool trace_streamlines_adaptive(YYLVVRes &res, UIRes &ui_res);
+    bool trace_streamlines_adaptive(App &app);
     bool simplify_streamlines();
 
     // seed point generation configurations

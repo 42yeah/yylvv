@@ -1,20 +1,22 @@
 #include "arrowglyph.cuh"
-#include "../ui.cuh"
 #include <vector>
 #include "../debug_kernels.cuh"
 #include "../utils.cuh"
+#include "../app.cuh"
 
 ArrowGlyphRenderState::ArrowGlyphRenderState() : num_arrows_x(100), num_arrows_y(100), vector_length(5.0f),
     arrow_glyph_vao(nullptr), arrow_glyph_program(nullptr), arrow_glyph_graphics_resource(nullptr),
-    current_visualizing_z(0.0f), visualize_xy(true) {
+    current_visualizing_z(0.0f), visualize_xy(true) 
+{
 
 }
 
-void ArrowGlyphRenderState::initialize(YYLVVRes &res, UIRes &ui_res) {
+void ArrowGlyphRenderState::initialize(App &app) 
+{
     // 4. Evaluate arrow glyphs for z=0, which is a massive vector field of arrows, with VAO structure of (POSITION, COLOR)
     // I actually think z=0 makes more sense (instead of x) so that we can see it first hand when camera is aligned
     initialize_arrow_glyph_resources();
-    if (!generate_arrow_glyphs(res, ui_res, 0.0f)) {
+    if (!generate_arrow_glyphs(app, 0.0f)) {
         std::cerr << "Failed to generate arrow glyphs?" << std::endl;
     }
     std::cout << "Use Q and E to switch visualizing plane. Currently visualizing: " << (num_arrows_x * num_arrows_y) << " glyphs." << std::endl
@@ -22,65 +24,80 @@ void ArrowGlyphRenderState::initialize(YYLVVRes &res, UIRes &ui_res) {
         << "Use UP ARROW and DOWN ARROW to increase/decrease vector length." << std::endl;
 }
 
-void ArrowGlyphRenderState::render(YYLVVRes &res, UIRes &ui_res) {
+void ArrowGlyphRenderState::render(App &app) 
+{
     // Show the arrow glyph VAO
     arrow_glyph_program->use();
     glUniformMatrix4fv(arrow_glyph_program->at("model"), 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
-    glUniformMatrix4fv(arrow_glyph_program->at("view"), 1, GL_FALSE, glm::value_ptr(ui_res.camera.view));
-    glUniformMatrix4fv(arrow_glyph_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(ui_res.camera.perspective));
+    glUniformMatrix4fv(arrow_glyph_program->at("view"), 1, GL_FALSE, glm::value_ptr(app.camera.view));
+    glUniformMatrix4fv(arrow_glyph_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(app.camera.perspective));
     arrow_glyph_vao->draw();
 }
 
-void ArrowGlyphRenderState::destroy() {
+void ArrowGlyphRenderState::destroy() 
+{
     CHECK_CUDA_ERROR(cudaGraphicsUnregisterResource(arrow_glyph_graphics_resource));
     arrow_glyph_graphics_resource = nullptr;
 }
 
-void ArrowGlyphRenderState::key_pressed(YYLVVRes &res, UIRes &ui_res, int key) {
+void ArrowGlyphRenderState::key_pressed(App &app, int key) 
+{
     switch (key) {
         case GLFW_KEY_P:
         {
             visualize_xy = !visualize_xy;
-            clamp_visualizing_z(res);
-            generate_arrow_glyphs(res, ui_res, current_visualizing_z);
+            clamp_visualizing_z(app);
+            generate_arrow_glyphs(app, current_visualizing_z);
             break;
         }
-
     }
 }
 
-void ArrowGlyphRenderState::clamp_visualizing_z(YYLVVRes &res) {
-    if (visualize_xy) {
-        current_visualizing_z = glm::clamp(current_visualizing_z, 0.0f, (float) res.vf_tex.extent.depth);
-    } else {
-        current_visualizing_z = glm::clamp(current_visualizing_z, 0.0f, (float) res.vf_tex.extent.width);
+void ArrowGlyphRenderState::clamp_visualizing_z(App &app) 
+{
+    if (visualize_xy) 
+    {
+        current_visualizing_z = glm::clamp(current_visualizing_z, 0.0f, (float) app.res.vf_tex.extent.depth);
+    } 
+    else 
+    {
+        current_visualizing_z = glm::clamp(current_visualizing_z, 0.0f, (float) app.res.vf_tex.extent.width);
     }
 }
 
-void ArrowGlyphRenderState::process_events(YYLVVRes &res, UIRes &ui_res) {
-    float layer_change_speed = (visualize_xy ? res.vf_tex.extent.depth : res.vf_tex.extent.width) * 0.1f;
-    if (glfwGetKey(res.window, GLFW_KEY_Q)) {
-        current_visualizing_z -= layer_change_speed * ui_res.delta_time;
-        clamp_visualizing_z(res);
-        generate_arrow_glyphs(res, ui_res, current_visualizing_z);
+void ArrowGlyphRenderState::process_events(App &app) {
+    float layer_change_speed = (visualize_xy ? app.res.vf_tex.extent.depth : app.res.vf_tex.extent.width) * 0.1f;
+    
+    if (glfwGetKey(app.window, GLFW_KEY_Q)) 
+    {
+        current_visualizing_z -= layer_change_speed * app.delta_time;
+        clamp_visualizing_z(app);
+        generate_arrow_glyphs(app, current_visualizing_z);
     }
-    if (glfwGetKey(res.window, GLFW_KEY_E)) {
-        current_visualizing_z += layer_change_speed * ui_res.delta_time;
-        clamp_visualizing_z(res);
-        generate_arrow_glyphs(res, ui_res, current_visualizing_z);
+    
+    if (glfwGetKey(app.window, GLFW_KEY_E)) 
+    {
+        current_visualizing_z += layer_change_speed * app.delta_time;
+        clamp_visualizing_z(app);
+        generate_arrow_glyphs(app, current_visualizing_z);
     }
-    if (glfwGetKey(res.window, GLFW_KEY_UP)) {
-        vector_length += 1.0f * ui_res.delta_time;
-        generate_arrow_glyphs(res, ui_res, current_visualizing_z);
+
+    if (glfwGetKey(app.window, GLFW_KEY_UP)) 
+    {
+        vector_length += 1.0f * app.delta_time;
+        generate_arrow_glyphs(app, current_visualizing_z);
     }
-    if (glfwGetKey(res.window, GLFW_KEY_DOWN)) {
-        vector_length -= 1.0f * ui_res.delta_time;
+
+    if (glfwGetKey(app.window, GLFW_KEY_DOWN)) 
+    {
+        vector_length -= 1.0f * app.delta_time;
         vector_length = glm::max(vector_length, 0.1f);
-        generate_arrow_glyphs(res, ui_res, current_visualizing_z);
+        generate_arrow_glyphs(app, current_visualizing_z);
     }
 }
 
-void ArrowGlyphRenderState::initialize_arrow_glyph_resources() {
+void ArrowGlyphRenderState::initialize_arrow_glyph_resources() 
+{
     // arrow glyph vertex memory layout: interleaved
     // PX, PY, PZ, NX, NY, NZ, CR, CG, CB
     int num_arrow_glyphs = num_arrows_x * num_arrows_y;
@@ -102,7 +119,9 @@ void ArrowGlyphRenderState::initialize_arrow_glyph_resources() {
     CHECK_CUDA_ERROR(cudaGraphicsGLRegisterBuffer(&arrow_glyph_graphics_resource, arrow_glyph_vao->vbo, cudaGraphicsMapFlagsNone));
     std::cout << "Compiling arrow glyph visualization shader." << std::endl;
     arrow_glyph_program = Program::make_program("shaders/arrows.vert", "shaders/arrows.frag");
-    if (!arrow_glyph_program || !arrow_glyph_program->valid) {
+    
+    if (!arrow_glyph_program || !arrow_glyph_program->valid) 
+    {
         std::cerr << "Failed to compile program?" << std::endl;
     }
 }
@@ -117,8 +136,10 @@ __device__ inline void set_arrow_glyph(float *float_arr, int offset, const glm::
     }
 }
 
-__global__ void generate_arrow_glyphs_kernel(float *glyphs_vbo_data, CUDATexture3D vf, bool visualize_xy, cudaTextureObject_t vector_magnitude_ctf, float vector_length, float v) {
-    glm::vec3 arrow[] = {
+__global__ void generate_arrow_glyphs_kernel(float *glyphs_vbo_data, CUDATexture3D vf, bool visualize_xy, cudaTextureObject_t vector_magnitude_ctf, float vector_length, float v) 
+{
+    glm::vec3 arrow[] = 
+    {
         // bottom face 1
         glm::vec3(-0.5f, -0.5f, -0.5f), glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(1.0f, 0.0f, 1.0f),
         glm::vec3(0.5f, -0.5f, -0.5f), glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(1.0f, 0.0f, 1.0f),
@@ -149,11 +170,14 @@ __global__ void generate_arrow_glyphs_kernel(float *glyphs_vbo_data, CUDATexture
         glm::vec3(0.5f, -0.5f, 0.5f), glm::vec3(0.894427191f, 0.4472135955f, 0.0f), glm::vec3(1.0f, 0.0f, 1.0f),
         glm::vec3(0.0f, 0.5f, 0.0f), glm::vec3(0.894427191f, 0.4472135955f, 0.0f), glm::vec3(1.0f, 0.0f, 1.0f)
     };
+
     glm::vec3 ori(0.0f, 0.0f, 0.0f);
     float4 vector = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
     float max_vec_length = 0.0f;
     int index = (blockIdx.y * gridDim.x + blockIdx.x) * 162; // pitch of 162 floats (POS, NOR, COLOR) * 18
-    if (visualize_xy) {
+    
+    if (visualize_xy) 
+    {
         int x = blockIdx.x;
         int y = blockIdx.y;
         float sx = ((float) x / gridDim.x) * vf.extent.width;
@@ -162,7 +186,9 @@ __global__ void generate_arrow_glyphs_kernel(float *glyphs_vbo_data, CUDATexture
         max_vec_length = glm::min(1.0f / gridDim.x * vf.extent.width, 1.0f / gridDim.y * vf.extent.height);
         vector = tex3D<float4>(vf.texture, sx, sy, sz);
         ori = glm::vec3(sx, sy, sz);
-    } else {
+    } 
+    else 
+    {
         float y = blockIdx.x;
         float z = blockIdx.y;
         float sx = v;
@@ -172,6 +198,7 @@ __global__ void generate_arrow_glyphs_kernel(float *glyphs_vbo_data, CUDATexture
         vector = tex3D<float4>(vf.texture, sx, sy, sz);
         ori = glm::vec3(sx, sy, sz);
     }
+
     float3 normalized = float3_normalize(vector);
     glm::vec3 up(normalized.x, normalized.y, normalized.z);
     glm::vec3 random_front = glm::vec3(0.0f, 0.0f, 1.0f);
@@ -181,8 +208,8 @@ __global__ void generate_arrow_glyphs_kernel(float *glyphs_vbo_data, CUDATexture
     float len = max_vec_length * (vector.w / vf.longest_vector) * vector_length;
     float4 color = tex1D<float4>(vector_magnitude_ctf, vector.w / vf.longest_vector * 4.0f + 0.5f);
 
-    // TODO: align the arrow towards vector field
-    for (int i = 0; i < 18; i++) {
+    for (int i = 0; i < 18; i++) 
+    {
         arrow[i * 3].y += 0.5f;
         arrow[i * 3].y *= len;
         arrow[i * 3] = ruf * arrow[i * 3];
@@ -190,10 +217,12 @@ __global__ void generate_arrow_glyphs_kernel(float *glyphs_vbo_data, CUDATexture
         arrow[i * 3 + 1] = ruf * arrow[i * 3 + 1];
         arrow[i * 3 + 2] = glm::vec3(color.x, color.y, color.z);
     }
+
     set_arrow_glyph(glyphs_vbo_data, index, arrow);
 }
 
-bool ArrowGlyphRenderState::generate_arrow_glyphs(YYLVVRes &res, UIRes &ui_res, float z) {
+bool ArrowGlyphRenderState::generate_arrow_glyphs(App &app, float z) 
+{
     int num_arrow_glyphs = num_arrows_x * num_arrows_y;
     int num_vertices = num_arrow_glyphs * 18;
     int num_floats = num_vertices * 9;
@@ -205,7 +234,7 @@ bool ArrowGlyphRenderState::generate_arrow_glyphs(YYLVVRes &res, UIRes &ui_res, 
     assert(size_in_bytes_mapped == size_in_bytes);
     dim3 num_blocks(num_arrows_x, num_arrows_y, 1);
     // num_threads can be 1 for all I care because between-thread communication is not required
-    generate_arrow_glyphs_kernel<<<num_blocks, 1>>>(glyphs_vbo_data, res.vf_tex, visualize_xy, ui_res.ctf_tex_cuda, vector_length, z);
+    generate_arrow_glyphs_kernel<<<num_blocks, 1>>>(glyphs_vbo_data, app.res.vf_tex, visualize_xy, app.ctf_tex_cuda, vector_length, z);
 //     while (true) {
 //         int idx;
 //         std::cin >> idx;

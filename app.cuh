@@ -14,6 +14,7 @@
 #include "renderstates/arrowglyph.cuh"
 #include "renderstates/streamline.cuh"
 
+class RenderState;
 
 class App
 {
@@ -43,6 +44,7 @@ private:
 
     void switch_state(std::shared_ptr<RenderState> new_state);
 
+public:
     YYLVVRes &res;
     GLFWwindow *window;
 

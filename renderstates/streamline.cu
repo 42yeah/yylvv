@@ -1,11 +1,14 @@
 #include "streamline.cuh"
 #include <iostream>
-#include "../ui.cuh"
+#include "../app.cuh"
 #include "../utils.cuh"
 #include "../debug_kernels.cuh"
 #include <curand.h>
 #include <curand_kernel.h>
+#include <cuda_runtime.h>
+#include <cuda_gl_interop.h>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 StreamLineRenderState::StreamLineRenderState() : num_seeds(200),
         num_lines(8192),
@@ -29,7 +32,7 @@ StreamLineRenderState::~StreamLineRenderState()
 
 }
 
-void StreamLineRenderState::initialize(YYLVVRes &res, UIRes &ui_res) {
+void StreamLineRenderState::initialize(App &app) {
     std::cout << "Use 'R' to toggle runge-kutta 4 integrator." << std::endl;
     std::cout << "Use 'T' to toggle adaptive mode." << std::endl;
     std::cout << "Adaptive mode controls:" << std::endl
@@ -41,7 +44,7 @@ void StreamLineRenderState::initialize(YYLVVRes &res, UIRes &ui_res) {
     if (!allocate_graphics_resources()) {
         std::cerr << "Faield to allocate graphics resources?" << std::endl;
     }
-    if (!generate_streamlines(res, ui_res)) {
+    if (!generate_streamlines(app)) {
         std::cerr << "Failed to generate streamlines?" << std::endl;
     }
 }
@@ -82,49 +85,49 @@ void StreamLineRenderState::destroy()
     streamline_graphics_resource = nullptr;
 }
 
-void StreamLineRenderState::render(YYLVVRes &res, UIRes &ui_res) 
+void StreamLineRenderState::render(App &app) 
 {
     streamline_program->use();
     glUniformMatrix4fv(streamline_program->at("model"), 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
-    glUniformMatrix4fv(streamline_program->at("view"), 1, GL_FALSE, glm::value_ptr(ui_res.camera.view));
-    glUniformMatrix4fv(streamline_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(ui_res.camera.perspective));
+    glUniformMatrix4fv(streamline_program->at("view"), 1, GL_FALSE, glm::value_ptr(app.camera.view));
+    glUniformMatrix4fv(streamline_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(app.camera.perspective));
     streamline_vao->draw();
 }
 
-void StreamLineRenderState::process_events(YYLVVRes &res, UIRes &ui_res) 
+void StreamLineRenderState::process_events(App &app) 
 {
-    if (glfwGetKey(res.window, GLFW_KEY_UP))
+    if (glfwGetKey(app.window, GLFW_KEY_UP))
     {
-        seeding_plane_x += 10.0f * ui_res.delta_time;
-        generate_streamlines(res, ui_res);
+        seeding_plane_x += 10.0f * app.delta_time;
+        generate_streamlines(app);
     }
-    if (glfwGetKey(res.window, GLFW_KEY_DOWN))
+    if (glfwGetKey(app.window, GLFW_KEY_DOWN))
     {
-        seeding_plane_x -= 10.0f * ui_res.delta_time;
-        generate_streamlines(res, ui_res);
+        seeding_plane_x -= 10.0f * app.delta_time;
+        generate_streamlines(app);
     }
-    if (glfwGetKey(res.window, GLFW_KEY_MINUS))
+    if (glfwGetKey(app.window, GLFW_KEY_MINUS))
     {
-        adaptive_explosion_radius -= 1.0f * ui_res.delta_time;
+        adaptive_explosion_radius -= 1.0f * app.delta_time;
         std::cout << "Current explosion radius: " << adaptive_explosion_radius << std::endl;
-        generate_streamlines(res, ui_res);
+        generate_streamlines(app);
     }
-    if (glfwGetKey(res.window, GLFW_KEY_EQUAL))
+    if (glfwGetKey(app.window, GLFW_KEY_EQUAL))
     {
-        adaptive_explosion_radius += 1.0f * ui_res.delta_time;
+        adaptive_explosion_radius += 1.0f * app.delta_time;
         std::cout << "Current explosion radius: " << adaptive_explosion_radius << std::endl;
-        generate_streamlines(res, ui_res);
+        generate_streamlines(app);
     }
 }
 
-void StreamLineRenderState::key_pressed(YYLVVRes &res, UIRes &ui_res, int key) 
+void StreamLineRenderState::key_pressed(App &app, int key) 
 {
     switch (key) 
     {
         case GLFW_KEY_R:
         {
             use_runge_kutta_4_integrator = !use_runge_kutta_4_integrator;
-            if (!generate_streamlines(res, ui_res))
+            if (!generate_streamlines(app))
             {
                 std::cerr << "Failed to generate streamlines?" << std::endl;
             }
@@ -134,7 +137,7 @@ void StreamLineRenderState::key_pressed(YYLVVRes &res, UIRes &ui_res, int key)
         case GLFW_KEY_T:
         {
             adaptive_mode = !adaptive_mode;
-            if (!generate_streamlines(res, ui_res)) 
+            if (!generate_streamlines(app)) 
             {
                 std::cerr << "Failed to generate streamlines?" << std::endl;
             }
@@ -145,7 +148,7 @@ void StreamLineRenderState::key_pressed(YYLVVRes &res, UIRes &ui_res, int key)
         {
             num_explosion--;
             std::cout << "Seed explosion count: " << num_explosion << std::endl;
-            generate_streamlines(res, ui_res);
+            generate_streamlines(app);
             break;
         }
 
@@ -153,7 +156,7 @@ void StreamLineRenderState::key_pressed(YYLVVRes &res, UIRes &ui_res, int key)
         {
             num_explosion++;
             std::cout << "Seed explosion count: " << num_explosion << std::endl;
-            generate_streamlines(res, ui_res);
+            generate_streamlines(app);
             break;
         }
 
@@ -161,7 +164,7 @@ void StreamLineRenderState::key_pressed(YYLVVRes &res, UIRes &ui_res, int key)
         {
             explosion_cooldown_counter--;
             std::cout << "Explosion cooldown counter: " << explosion_cooldown_counter << std::endl;
-            generate_streamlines(res, ui_res);
+            generate_streamlines(app);
             break;
         }
 
@@ -169,7 +172,7 @@ void StreamLineRenderState::key_pressed(YYLVVRes &res, UIRes &ui_res, int key)
         {
             explosion_cooldown_counter++;
             std::cout << "Explosion cooldown counter: " << explosion_cooldown_counter << std::endl;
-            generate_streamlines(res, ui_res);
+            generate_streamlines(app);
             break;
         }
 
@@ -184,7 +187,7 @@ void StreamLineRenderState::key_pressed(YYLVVRes &res, UIRes &ui_res, int key)
             {
                 std::cout << "Streamline simplification is now OFF." << std::endl;
             }
-            generate_streamlines(res, ui_res);
+            generate_streamlines(app);
             break;
         }
     }
@@ -208,23 +211,23 @@ bool StreamLineRenderState::generate_seed_points(const BBox &bbox, int num_seeds
     return true;
 }
 
-bool StreamLineRenderState::generate_streamlines(YYLVVRes &res, UIRes &ui_res) 
+bool StreamLineRenderState::generate_streamlines(App &app) 
 {
     if (adaptive_mode)
     {
-        if (!trace_streamlines_adaptive(res, ui_res))
+        if (!trace_streamlines_adaptive(app))
         {
             std::cerr << "Failed to adaptively trace streamlines?" << std::endl;
         }
     }
     else // just generate streamlines as normal
     {
-        if (!generate_seed_points(ui_res.delta_wing_bounding_box, num_seeds)) 
+        if (!generate_seed_points(app.delta_wing_bounding_box, num_seeds)) 
         {
             std::cerr << "Failed to generate seed points?" << std::endl;
             return false;
         }
-        if (!trace_streamlines(res, ui_res)) 
+        if (!trace_streamlines(app)) 
         {
             std::cerr << "Failed to trace streamlines?" << std::endl;
             return false;
@@ -309,7 +312,7 @@ __global__ void trace_streamlines_kernel(glm::vec3 *seed_points, int num_seeds, 
     }
 }
 
-bool StreamLineRenderState::trace_streamlines(YYLVVRes &res, UIRes &ui_res) 
+bool StreamLineRenderState::trace_streamlines(App &app) 
 {
     int num_blocks_x = 32;
     int num_blocks_y = (seed_points.size() + (num_blocks_x - 1)) / num_blocks_x;
@@ -327,7 +330,7 @@ bool StreamLineRenderState::trace_streamlines(YYLVVRes &res, UIRes &ui_res)
     CHECK_CUDA_ERROR(cudaMemcpy(seed_points_cuda, seed_points.data(), seed_points_size, cudaMemcpyHostToDevice));
 
     assert(seed_points.size() == num_seeds);
-    trace_streamlines_kernel<<<num_blocks, 1>>>(seed_points_cuda, num_seeds, num_lines, vbo_data, res.vf_tex, simulation_dt, ui_res.ctf_tex_cuda, ui_res.delta_wing_bounding_box, use_runge_kutta_4_integrator);
+    trace_streamlines_kernel<<<num_blocks, 1>>>(seed_points_cuda, num_seeds, num_lines, vbo_data, app.res.vf_tex, simulation_dt, app.ctf_tex_cuda, app.delta_wing_bounding_box, use_runge_kutta_4_integrator);
 
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
@@ -478,11 +481,11 @@ __global__ void trace_and_generate_kernel(glm::vec3 *seed_points,
     }
 }
 
-bool StreamLineRenderState::trace_streamlines_adaptive(YYLVVRes &res, UIRes &ui_res)
+bool StreamLineRenderState::trace_streamlines_adaptive(App &app)
 {
     // 1. Generate n/2 initial seeds
     int n_initial_seeds = num_seeds / 2;
-    if (!generate_seed_points(ui_res.delta_wing_bounding_box, n_initial_seeds))
+    if (!generate_seed_points(app.delta_wing_bounding_box, n_initial_seeds))
     {
         std::cerr << "Failed to generate initial adaptive seed points?" << std::endl;
         return false;
@@ -525,7 +528,7 @@ bool StreamLineRenderState::trace_streamlines_adaptive(YYLVVRes &res, UIRes &ui_
         constexpr float seed_point_threshold = 10.0f;
         trace_and_generate_kernel<<<num_blocks, 1>>>(seed_points_cuda, num_seeds_cuda, num_seeds, num_lines, 
             trace_start, trace_end,
-            vbo_data, res.vf_tex, simulation_dt, ui_res.ctf_tex_cuda, ui_res.delta_wing_bounding_box,
+            vbo_data, app.res.vf_tex, simulation_dt, app.ctf_tex_cuda, app.delta_wing_bounding_box,
             use_runge_kutta_4_integrator, seed_point_threshold, adaptive_explosion_radius, num_explosion,
             explosion_cooldown_counter, debug);
 
@@ -556,7 +559,7 @@ bool StreamLineRenderState::trace_streamlines_adaptive(YYLVVRes &res, UIRes &ui_
         constexpr float seed_point_threshold = 10.0f;
         trace_and_generate_kernel<<<num_blocks, 1>>>(seed_points_cuda, num_seeds_cuda, num_seeds, num_lines, 
             trace_start, trace_end,
-            vbo_data, res.vf_tex, simulation_dt, ui_res.ctf_tex_cuda, ui_res.delta_wing_bounding_box,
+            vbo_data, app.res.vf_tex, simulation_dt, app.ctf_tex_cuda, app.delta_wing_bounding_box,
             use_runge_kutta_4_integrator, seed_point_threshold, adaptive_explosion_radius, num_explosion,
             explosion_cooldown_counter, debug);
         CHECK_CUDA_ERROR(cudaDeviceSynchronize());

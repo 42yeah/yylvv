@@ -1,4 +1,5 @@
 #include "app.cuh"
+#include <glm/gtc/type_ptr.hpp>
 
 // For GLFW stuffs
 App *bound_app = nullptr;
@@ -172,7 +173,7 @@ void App::key_callback(GLFWwindow *window, int key, int scancode, int action, in
             break;
     }
     if (render_state) {
-        // ui_res.render_state->key_pressed(res, ui_res, key);
+        render_state->key_pressed(*this, key);
     }
 }
 
@@ -243,7 +244,7 @@ void App::loop()
 
         if (render_state) 
         {
-            // render_state->process_events(res, ui_res);
+            render_state->process_events(*this);
         }
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -252,7 +253,7 @@ void App::loop()
 
         if (render_state) 
         {
-            // render_state->render(res);
+            render_state->render(*this);
         }
 
         glfwSwapBuffers(window);
@@ -284,5 +285,5 @@ void App::switch_state(std::shared_ptr<RenderState> new_state)
         render_state->destroy();
     }
     render_state = new_state;
-    // render_state->initialize(res, ui_res);
+    render_state->initialize(*this);
 }

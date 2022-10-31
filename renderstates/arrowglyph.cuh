@@ -13,16 +13,16 @@
 class ArrowGlyphRenderState : public RenderState {
 public:
     ArrowGlyphRenderState();
-    virtual void initialize(YYLVVRes &res, UIRes &ui_res) override;
+    virtual void initialize(App &app) override;
     virtual void destroy() override;
-    virtual void render(YYLVVRes &res, UIRes &ui_res) override;
-    virtual void process_events(YYLVVRes &res, UIRes &ui_res) override;
-    virtual void key_pressed(YYLVVRes &res, UIRes &ui_res, int key) override;
+    virtual void render(App &app) override;
+    virtual void process_events(App &app) override;
+    virtual void key_pressed(App &app, int key) override;
 
 private:
     void initialize_arrow_glyph_resources();
-    bool generate_arrow_glyphs(YYLVVRes &res, UIRes &ui_res, float z);
-    void clamp_visualizing_z(YYLVVRes &res);
+    bool generate_arrow_glyphs(App &app, float z);
+    void clamp_visualizing_z(App &app);
 
     // Vector field arrow glyph configurations
     int num_arrows_x, num_arrows_y;

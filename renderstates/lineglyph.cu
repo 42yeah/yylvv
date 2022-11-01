@@ -187,8 +187,8 @@ bool LineGlyphRenderState::generate_line_glyphs(App &app, float z)
 
 void LineGlyphRenderState::draw_user_controls(App &app)
 {
-    ImGui::SetNextWindowPos({(float) app.screen_width - 200.0f, 0.0f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({200, 400}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({220.0f, 0.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({app.screen_width - 220.0f, 140}, ImGuiCond_FirstUseEver);
     
     bool should_update = false;
 

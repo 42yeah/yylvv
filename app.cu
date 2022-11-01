@@ -1,5 +1,7 @@
 #include "app.cuh"
 #include <glm/gtc/type_ptr.hpp>
+#include <fstream>
+#include <iomanip>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
@@ -11,7 +13,9 @@ App::App(YYLVVRes &res) : res(res),
     window(res.window),
     valid(false),
     user_interface_mode(false),
-    visualization_mode(0)
+    visualization_mode(0),
+    should_draw_bounding_box(true),
+    should_draw_delta_wing(true)
 {
     if (!init())
     {
@@ -329,21 +333,27 @@ void App::loop()
 
 void App::draw_delta_wing() const
 {
-    // 1. Draw the bounding box (that we calculated)
-    bounding_box_program->use();
-    glm::mat4 model = glm::translate(glm::mat4(1.0f), delta_wing_bounding_box.center());
-    model = glm::scale(model, delta_wing_bounding_box.extend());
-    glUniformMatrix4fv(bounding_box_program->at("model"), 1, GL_FALSE, glm::value_ptr(model));
-    glUniformMatrix4fv(bounding_box_program->at("view"), 1, GL_FALSE, glm::value_ptr(camera.view));
-    glUniformMatrix4fv(bounding_box_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(camera.perspective));
-    bounding_box_vao->draw();
+    if (should_draw_bounding_box)
+    {
+        // 1. Draw the bounding box (that we calculated)
+        bounding_box_program->use();
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), delta_wing_bounding_box.center());
+        model = glm::scale(model, delta_wing_bounding_box.extend());
+        glUniformMatrix4fv(bounding_box_program->at("model"), 1, GL_FALSE, glm::value_ptr(model));
+        glUniformMatrix4fv(bounding_box_program->at("view"), 1, GL_FALSE, glm::value_ptr(camera.view));
+        glUniformMatrix4fv(bounding_box_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(camera.perspective));
+        bounding_box_vao->draw();
+    }
 
-    // 2. Draw the delta wing triangle
-    delta_wing_program->use();
-    glUniformMatrix4fv(delta_wing_program->at("model"), 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
-    glUniformMatrix4fv(delta_wing_program->at("view"), 1, GL_FALSE, glm::value_ptr(camera.view));
-    glUniformMatrix4fv(delta_wing_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(camera.perspective));
-    delta_wing_vao->draw();
+    if (should_draw_delta_wing)
+    {
+        // 2. Draw the delta wing triangle
+        delta_wing_program->use();
+        glUniformMatrix4fv(delta_wing_program->at("model"), 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
+        glUniformMatrix4fv(delta_wing_program->at("view"), 1, GL_FALSE, glm::value_ptr(camera.view));
+        glUniformMatrix4fv(delta_wing_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(camera.perspective));
+        delta_wing_vao->draw();
+    }
 }
 
 void App::switch_state(std::shared_ptr<RenderState> new_state)
@@ -415,9 +425,36 @@ void App::draw_user_controls()
     }
     ImGui::End();
 
-    // TODO: maybe add a camera control as well?
+    ImGui::SetNextWindowPos({0, 200}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({250, 180}, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Camera configurations"))
+    {
+        bool should_update_camera = false;
+        float camera_eye[3] = {camera.eye.x, camera.eye.y, camera.eye.z};
+        float camera_py[2] = {camera.pitch, camera.yaw};
 
-    ImGui::ShowDemoWindow();
+        ImGui::Text("Camera position");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputFloat3("##position", camera_eye);
+        ImGui::Text("Pitch & yaw");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputFloat2("##pitchyaw", camera_py);
+        ImGui::Checkbox("Bounding box", &should_draw_bounding_box);
+        ImGui::Checkbox("Delta wing", &should_draw_delta_wing);
+
+        if (ImGui::Button("Favorite camera pose"))
+        {
+            favorite_camera_pose();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Restore"))
+        {
+            restore_camera_pose();
+        }
+    }
+    ImGui::End();
+
+    // ImGui::ShowDemoWindow();
 }
 
 void App::set_user_interface_mode(bool new_ui_mode)
@@ -433,4 +470,37 @@ void App::set_user_interface_mode(bool new_ui_mode)
     {
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
+}
+
+void App::favorite_camera_pose() const
+{
+    std::ofstream dumper("camera_pose.txt");
+    if (!dumper.good())
+    {
+        std::cerr << "Bad writer for camera_pose.txt?" << std::endl;
+        return;
+    }
+
+    constexpr auto max_precision = std::numeric_limits<long double>::digits10 + 1;
+    dumper << std::setprecision(max_precision);
+    dumper << camera.eye.x << " " << camera.eye.y << " " << camera.eye.z << std::endl;
+    dumper << camera.pitch << " " << camera.yaw << " " << camera.sensitivity << " " << camera.speed << std::endl;
+    dumper << camera.z_near << " " << camera.z_far << std::endl;
+    dumper.close();
+}
+
+void App::restore_camera_pose()
+{
+    std::ifstream reader("camera_pose.txt");
+    if (!reader.good())
+    {
+        std::cerr << "Cannot read camera_pose.txt?" << std::endl;
+        return;
+    }
+
+    reader >> camera.eye.x >> camera.eye.y >> camera.eye.z
+        >> camera.pitch >> camera.yaw >> camera.sensitivity >> camera.speed
+        >> camera.z_near >> camera.z_far;
+    reader.close();
+    camera.update_components(screen_width, screen_height);    
 }

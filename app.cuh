@@ -48,6 +48,10 @@ private:
     void draw_user_controls();
     void set_user_interface_mode(bool new_ui_mode);
 
+    // Favourite camera pose
+    void favorite_camera_pose() const;
+    void restore_camera_pose();
+
 public:
     YYLVVRes &res;
     GLFWwindow *window;
@@ -74,6 +78,8 @@ public:
     // UI controls
     bool user_interface_mode;
     int visualization_mode;
+    bool should_draw_bounding_box;
+    bool should_draw_delta_wing;
 };
 
 #endif // APP_CUH

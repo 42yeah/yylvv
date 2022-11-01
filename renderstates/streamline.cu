@@ -707,8 +707,8 @@ bool StreamLineRenderState::simplify_streamlines()
 
 void StreamLineRenderState::draw_user_controls(App &app)
 {
-    ImGui::SetNextWindowPos({(float) app.screen_width - 200.0f, 0.0f}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({200, 400}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({220.0f, 0.0f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({app.screen_width - 220.0f, 140}, ImGuiCond_FirstUseEver);
     
     bool should_update = false;
 
@@ -721,6 +721,11 @@ void StreamLineRenderState::draw_user_controls(App &app)
             should_update = true;
         }
         should_update |= ImGui::SliderFloat("Seeding plane (X axis)", &seeding_plane_x, 0.0f, app.res.vf_tex.extent.width);
+        if (ImGui::Button("Go to critical region"))
+        {
+            seeding_plane_x = 51.0f;
+            should_update = true;
+        }
         should_update |= ImGui::Checkbox("Use Runge-Kutta 4 integrator", &use_runge_kutta_4_integrator);
         should_update |= ImGui::Checkbox("Adaptive seeding", &adaptive_mode);
 

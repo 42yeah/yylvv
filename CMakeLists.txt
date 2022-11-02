@@ -37,6 +37,9 @@ target_compile_options(yylvv_2_0 PUBLIC
 # NRRD dependency
 add_subdirectory(nrrd)
 
+# Tools
+add_subdirectory(tools)
+
 target_link_libraries(yylvv_2_0 PUBLIC
     glfw
     glm::glm

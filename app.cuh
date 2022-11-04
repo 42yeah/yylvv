@@ -52,6 +52,9 @@ private:
     void favorite_camera_pose() const;
     void restore_camera_pose();
 
+    // Debug sample vector field
+    void debug_vf() const;
+
 public:
     YYLVVRes &res;
     GLFWwindow *window;

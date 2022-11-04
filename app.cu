@@ -5,6 +5,7 @@
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
+#include "debug_kernels.cuh"
 
 // For GLFW stuffs
 App *bound_app = nullptr;
@@ -210,6 +211,10 @@ void App::key_callback(GLFWwindow *window, int key, int scancode, int action, in
 
         case GLFW_KEY_SPACE:
             set_user_interface_mode(!user_interface_mode);
+            break;
+
+        case GLFW_KEY_GRAVE_ACCENT:
+            debug_vf();
             break;
     }
 
@@ -429,7 +434,7 @@ void App::draw_user_controls()
     ImGui::SetNextWindowSize({250, 180}, ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Camera configurations"))
     {
-        bool should_update_camera = false;
+        // bool should_update_camera = false;
         float camera_eye[3] = {camera.eye.x, camera.eye.y, camera.eye.z};
         float camera_py[2] = {camera.pitch, camera.yaw};
 
@@ -503,4 +508,24 @@ void App::restore_camera_pose()
         >> camera.z_near >> camera.z_far;
     reader.close();
     camera.update_components(screen_width, screen_height);    
+}
+
+void App::debug_vf() const
+{
+    std::cout << "Entering vector field debug mode." << std::endl;
+    std::cout << "Input coordinates to sample texture." << std::endl;
+
+    float x, y, z;
+    
+    while (true)
+    {
+        std::cin >> x >> y >> z;
+        if (x < 0 || y < 0 || z < 0)
+        {
+            break;
+        }
+
+        float4 result = launch_sample_single_texture_3d_kernel(res.vf_tex.texture, x, y, z);
+        std::cout << result.x << ", " << result.y << ", " << result.z << ", " << result.w << std::endl;
+    }
 }

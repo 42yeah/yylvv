@@ -8,6 +8,7 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "utils.cuh"
+#include "../nrrd/PlainText.h"
 
 struct CUDATexture3D {
     BBox get_bounding_box() const;
@@ -26,6 +27,7 @@ struct YYLVVRes {
 bool initialize_yylvv_contents(int argc, char *argv[], YYLVVRes &res);
 GLFWwindow *create_yylvv_window(int width, int height, const std::string &title);
 bool nrrd_to_3d_texture(NRRD &nrrd, CUDATexture3D &ret_tex);
+bool plain_text_to_3d_texture(PlainText &plain_text, CUDATexture3D &ret_tex);
 bool free_yylvv_resources(YYLVVRes &res);
 
 // === IMPLEMENTATIONS ===
@@ -37,17 +39,31 @@ bool initialize_yylvv_contents(int argc, char *argv[], YYLVVRes &res) {
         std::cerr << "Wrong number of arguments: " << argc << "?" << std::endl;
         return false;
     }
-    NRRD nrrd;
-    if (!nrrd.load_from_file(argv[1])) {
-        std::cerr << "Cannot load NRRD?" << std::endl;
+    // NRRD nrrd;
+    // if (!nrrd.load_from_file(argv[1])) {
+    //     std::cerr << "Cannot load NRRD?" << std::endl;
+    //     return false;
+    // }
+    // std::cout << "NRRD loaded. Size: " << nrrd.sizes[0] << ", " << nrrd.sizes[1] << ", " << nrrd.sizes[2] << ", " << nrrd.sizes[3] << std::endl;
+    // std::cout << "Loading vector field into CUDA 3D texture..." << std::endl;
+    // if (!nrrd_to_3d_texture(nrrd, res.vf_tex)) {
+    //     std::cerr << "Cannot transform NRRD into 3D texture?" << std::endl;
+    //     return false;
+    // }
+
+    // Test read plain text
+    PlainText plain_text;
+    if (!plain_text.load_from_file("bluntfin.txt"))
+    {
+        std::cerr << "Failed to load from file?" << std::endl;
         return false;
     }
-    std::cout << "NRRD loaded. Size: " << nrrd.sizes[0] << ", " << nrrd.sizes[1] << ", " << nrrd.sizes[2] << ", " << nrrd.sizes[3] << std::endl;
-    std::cout << "Loading vector field into CUDA 3D texture..." << std::endl;
-    if (!nrrd_to_3d_texture(nrrd, res.vf_tex)) {
-        std::cerr << "Cannot transform NRRD into 3D texture?" << std::endl;
+    if (!plain_text_to_3d_texture(plain_text, res.vf_tex))
+    {
+        std::cerr << "Cannot transform plain text data into 3D texture?" << std::endl;
         return false;
     }
+
     std::cout << "Creating YYLVV window and OpenGL context." << std::endl;
     res.window = create_yylvv_window(1024, 768, "YYLVV visualizer");
     if (!res.window) {
@@ -116,6 +132,86 @@ bool nrrd_to_3d_texture(NRRD &nrrd, CUDATexture3D &ret_tex) {
     ret_tex.array = vf_float4_cuda;
     ret_tex.extent = extent;
     ret_tex.longest_vector = longest;
+    return true;
+}
+
+bool plain_text_to_3d_texture(PlainText &plain_text, CUDATexture3D &ret_tex)
+{
+    if (!plain_text.raw_data)
+    {
+        std::cerr << "No input plain text vector field data?" << std::endl;
+        return false;
+    }
+
+    std::unique_ptr<float4[]> vf_float4 = std::make_unique<float4[]>(plain_text.sizes.x * plain_text.sizes.y * plain_text.sizes.z);
+    float longest = 0.0f;
+
+    for (int z = 0; z < plain_text.sizes.z; z++) 
+    {
+        for (int y = 0; y < plain_text.sizes.y; y++) 
+        {
+            for (int x = 0; x < plain_text.sizes.x; x++) 
+            {
+                int idx = z * plain_text.sizes.z * plain_text.sizes.y + y * plain_text.sizes.x + x;
+                int pt_idx = idx * 3; // pitched by 3
+                float vx = plain_text.raw_data[pt_idx + 0],
+                    vy = plain_text.raw_data[pt_idx + 1],
+                    vz = plain_text.raw_data[pt_idx + 2];
+                float vl = vector_length(vx, vy, vz);
+                
+                if (longest < vl) 
+                {
+                    longest = vl;
+                }
+
+                // std::cout << x << ", " << y << ", " << z << " is " << vl << " long" << std::endl;
+                vf_float4[idx] = make_float4(vx, vy, vz, vl);
+            }
+        }
+    }
+
+    std::cout << "Allocating CUDA array: (" << plain_text.sizes.x << ", " << 
+        plain_text.sizes.y << ", " << plain_text.sizes.z << 
+        ") with channel size of " << sizeof(float4) << std::endl;
+
+    cudaArray_t vf_float4_cuda = nullptr;
+    cudaChannelFormatDesc desc = cudaCreateChannelDesc<float4>();
+    cudaExtent extent = make_cudaExtent(plain_text.sizes.x, plain_text.sizes.y, plain_text.sizes.z);
+
+    CHECK_CUDA_ERROR(cudaMalloc3DArray(&vf_float4_cuda, &desc, extent, 0));
+
+    const int w_pitch = plain_text.sizes.x * sizeof(float4);
+    cudaMemcpy3DParms vf_float4_copy_params = {0};
+
+    vf_float4_copy_params.srcPtr = make_cudaPitchedPtr((void *) vf_float4.get(), w_pitch, plain_text.sizes.x, plain_text.sizes.y);
+    vf_float4_copy_params.dstArray = vf_float4_cuda;
+    vf_float4_copy_params.extent = extent;
+    vf_float4_copy_params.kind = cudaMemcpyHostToDevice;
+
+    CHECK_CUDA_ERROR(cudaMemcpy3D(&vf_float4_copy_params));
+
+    cudaResourceDesc rdesc;
+    std::memset(&rdesc, 0, sizeof(cudaResourceDesc));
+    rdesc.resType = cudaResourceTypeArray;
+    rdesc.res.array.array = vf_float4_cuda;
+
+    cudaTextureDesc tdesc;
+    std::memset(&tdesc, 0, sizeof(cudaTextureDesc));
+    tdesc.addressMode[0] = cudaAddressModeClamp;
+    tdesc.addressMode[1] = cudaAddressModeClamp;
+    tdesc.addressMode[2] = cudaAddressModeClamp;
+    tdesc.filterMode = cudaFilterModeLinear;
+    tdesc.readMode = cudaReadModeElementType;
+    tdesc.normalizedCoords = 0;
+
+    cudaTextureObject_t vf_tex;
+    CHECK_CUDA_ERROR(cudaCreateTextureObject(&vf_tex, &rdesc, &tdesc, nullptr));
+
+    ret_tex.texture = vf_tex;
+    ret_tex.array = vf_float4_cuda;
+    ret_tex.extent = extent;
+    ret_tex.longest_vector = longest;
+
     return true;
 }
 

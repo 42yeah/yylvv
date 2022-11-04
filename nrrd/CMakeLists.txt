@@ -1,6 +1,6 @@
 project(yylvv_nrrd)
 find_package(glm REQUIRED)
-add_library(yylvv_nrrd NRRD.cpp NRRD.h VectorField.cpp VectorField.h)
+add_library(yylvv_nrrd NRRD.cpp NRRD.h VectorField.cpp VectorField.h PlainText.cpp)
 target_link_libraries(yylvv_nrrd PUBLIC
         glm::glm)
 # maybe my macOS's glm cmake is broken

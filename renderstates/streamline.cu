@@ -23,8 +23,12 @@ StreamLineRenderState::StreamLineRenderState() : num_seeds(200),
         adaptive_explosion_radius(1.0f),
         num_explosion(1),
         explosion_cooldown_counter(10),
+        seed_point_threshold(10.0f),
         do_simplify(false),
-        distortion_threshold(1.01f)
+        distortion_threshold(1.01f),
+        seed_points_strategy(0),
+        seed_begin(0.0f),
+        seed_end(0.0f)
 {
 
 }
@@ -197,7 +201,7 @@ void StreamLineRenderState::key_pressed(App &app, int key)
 
 // generate seeds across y plane because that's what the original blog post does
 // TODO: add other ways to generate seed
-bool StreamLineRenderState::generate_seed_points(const BBox &bbox, int num_seeds) 
+bool StreamLineRenderState::generate_seed_points_delta_wing(const BBox &bbox, int num_seeds) 
 {
     seed_points.clear();
     glm::vec3 step = glm::vec3(0.0f,
@@ -213,6 +217,62 @@ bool StreamLineRenderState::generate_seed_points(const BBox &bbox, int num_seeds
     return true;
 }
 
+bool StreamLineRenderState::generate_seed_points_line(glm::vec3 a, glm::vec3 b, int num_seeds)
+{
+    seed_points.clear();
+    glm::vec3 step = (b - a) * ((1.0f) / (num_seeds - 1));
+    glm::vec3 current_seed = a;
+
+    for (int i = 0; i < num_seeds; i++)
+    {
+        seed_points.push_back(current_seed);
+        current_seed += step;
+    }
+    return true;
+}
+
+bool StreamLineRenderState::generate_seed_points_rect(glm::vec3 a, glm::vec3 b, int num_seeds)
+{
+    seed_points.clear();
+    int width = (int) sqrtf(num_seeds);
+    int height = num_seeds / width;
+    glm::vec3 xz = b - a;
+    xz.y = 0.0f;
+
+    glm::vec3 xz_steps = xz * ((1.0f) / (width - 1));
+    float y_steps = (b - a).y / (height - 1);
+
+    glm::vec3 current_seed = a;
+
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            seed_points.push_back(current_seed);
+            current_seed += xz_steps;
+        }
+        current_seed = glm::vec3(a.x, a.y + y_steps * y, a.z);
+    }
+    std::cout << "Rectangular seed generation: " << seed_points.size() << " seeds generated." << std::endl;
+    return true;
+}
+
+bool StreamLineRenderState::generate_seed_points(App &app, int num_seeds)
+{
+    if (seed_points_strategy == 0)
+    {
+        return generate_seed_points_delta_wing(app.delta_wing_bounding_box, num_seeds);
+    }
+    else if (seed_points_strategy == 1)
+    {
+        return generate_seed_points_line(seed_begin, seed_end, num_seeds);
+    }
+    else
+    {
+        return generate_seed_points_rect(seed_begin, seed_end, num_seeds);
+    }
+}
+
 bool StreamLineRenderState::generate_streamlines(App &app) 
 {
     if (adaptive_mode)
@@ -224,7 +284,10 @@ bool StreamLineRenderState::generate_streamlines(App &app)
     }
     else // just generate streamlines as normal
     {
-        if (!generate_seed_points(app.delta_wing_bounding_box, num_seeds)) 
+        // glm::vec3 begin_seeds = glm::vec3(0.1f, 10.1f, seeding_plane_x);
+        // glm::vec3 end_seeds = begin_seeds;
+        // end_seeds.x = app.delta_wing_bounding_box.max.x;
+        if (!generate_seed_points(app, num_seeds))
         {
             std::cerr << "Failed to generate seed points?" << std::endl;
             return false;
@@ -331,8 +394,16 @@ bool StreamLineRenderState::trace_streamlines(App &app)
     CHECK_CUDA_ERROR(cudaMalloc(&seed_points_cuda, seed_points_size));
     CHECK_CUDA_ERROR(cudaMemcpy(seed_points_cuda, seed_points.data(), seed_points_size, cudaMemcpyHostToDevice));
 
-    assert(seed_points.size() == num_seeds);
+    // assert(seed_points.size() == num_seeds);
     trace_streamlines_kernel<<<num_blocks, 1>>>(seed_points_cuda, num_seeds, num_lines, vbo_data, app.res.vf_tex, simulation_dt, app.ctf_tex_cuda, app.delta_wing_bounding_box, use_runge_kutta_4_integrator);
+
+    // while (true)
+    // {
+    //     int index;
+    //     std::cin >> index;
+    //     glm::vec3 fl = access_data_on_device<glm::vec3>((glm::vec3 *) vbo_data, index * 3);
+    //     std::cout << fl.x << ", " << fl.y << ", " << fl.z << std::endl;
+    // }
 
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
@@ -487,7 +558,7 @@ bool StreamLineRenderState::trace_streamlines_adaptive(App &app)
 {
     // 1. Generate n/2 initial seeds
     int n_initial_seeds = num_seeds / 2;
-    if (!generate_seed_points(app.delta_wing_bounding_box, n_initial_seeds))
+    if (!generate_seed_points(app, n_initial_seeds))
     {
         std::cerr << "Failed to generate initial adaptive seed points?" << std::endl;
         return false;
@@ -527,7 +598,6 @@ bool StreamLineRenderState::trace_streamlines_adaptive(App &app)
 
         dim3 num_blocks(num_blocks_x, num_blocks_y, 1);
 
-        constexpr float seed_point_threshold = 10.0f;
         trace_and_generate_kernel<<<num_blocks, 1>>>(seed_points_cuda, num_seeds_cuda, num_seeds, num_lines, 
             trace_start, trace_end,
             vbo_data, app.res.vf_tex, simulation_dt, app.ctf_tex_cuda, app.delta_wing_bounding_box,
@@ -720,11 +790,27 @@ void StreamLineRenderState::draw_user_controls(App &app)
             simulation_dt = 1.0f / 256.0f;
             should_update = true;
         }
-        should_update |= ImGui::SliderFloat("Seeding plane (X axis)", &seeding_plane_x, 0.0f, app.res.vf_tex.extent.width);
-        if (ImGui::Button("Go to critical region"))
+        if (ImGui::RadioButton("Delta wing recommended strategy", seed_points_strategy == 0)) { seed_points_strategy = 0; should_update = true; }
+        if (ImGui::RadioButton("Line", seed_points_strategy == 1)) { seed_points_strategy = 1; should_update = true; }
+        if (ImGui::RadioButton("Rect", seed_points_strategy == 2)) { seed_points_strategy = 2; should_update = true; }
+        if (seed_points_strategy != 0 && ImGui::CollapsingHeader("Seeding strategy"))
         {
-            seeding_plane_x = 51.0f;
-            should_update = true;
+            ImGui::Text("Bounding box: (%f %f %f)", app.delta_wing_bounding_box.max.x,
+                app.delta_wing_bounding_box.max.y,
+                app.delta_wing_bounding_box.max.z);
+
+            should_update |= ImGui::InputFloat3("Seed begin", (float *) &seed_begin);
+            should_update |= ImGui::InputFloat3("Seed end", (float *) &seed_end);
+            ImGui::Text("Seeding plane offset axis");
+        }
+        if (seed_points_strategy == 0)
+        {
+            should_update |= ImGui::SliderFloat("Seeding plane (X axis)", &seeding_plane_x, 0.0f, app.res.vf_tex.extent.width);
+            if (ImGui::Button("Go to critical region"))
+            {
+                seeding_plane_x = 51.0f;
+                should_update = true;
+            }
         }
         should_update |= ImGui::Checkbox("Use Runge-Kutta 4 integrator", &use_runge_kutta_4_integrator);
         should_update |= ImGui::Checkbox("Adaptive seeding", &adaptive_mode);
@@ -733,6 +819,7 @@ void StreamLineRenderState::draw_user_controls(App &app)
         {
             if (ImGui::CollapsingHeader("Adaptive mode properties"))
             {
+                should_update |= ImGui::SliderFloat("Seed point generation threshold", &seed_point_threshold, 0.1f, 20.0f);
                 should_update |= ImGui::SliderFloat("Adaptive explosion radius", &adaptive_explosion_radius, 1.0f, 20.0f);
                 should_update |= ImGui::SliderInt("Number of explosions", &num_explosion, 1, 10);
                 should_update |= ImGui::SliderInt("Explosion cooldown counter", &explosion_cooldown_counter, 1, 200);

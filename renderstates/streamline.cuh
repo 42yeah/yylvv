@@ -23,7 +23,10 @@ public:
 private:
     bool allocate_graphics_resources();
     bool generate_streamlines(App &app);
-    bool generate_seed_points(const BBox &bbox, int num_seeds);
+    bool generate_seed_points(App &app, int num_seeds);
+    bool generate_seed_points_delta_wing(const BBox &bbox, int num_seeds);
+    bool generate_seed_points_line(glm::vec3 a, glm::vec3 b, int num_seeds);
+    bool generate_seed_points_rect(glm::vec3 a, glm::vec3 b, int num_seeds);
     bool trace_streamlines(App &app);
 
     bool trace_streamlines_adaptive(App &app);
@@ -46,10 +49,16 @@ private:
     float adaptive_explosion_radius;
     int num_explosion;
     int explosion_cooldown_counter;
+    float seed_point_threshold;
 
     // streamline simplification
     bool do_simplify;
     float distortion_threshold;
+
+    // true == use delta wing recommended strat
+    int seed_points_strategy;
+    glm::vec3 seed_begin;
+    glm::vec3 seed_end;
 };
 
 #endif

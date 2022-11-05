@@ -47,6 +47,8 @@ void StreamLineRenderState::initialize(App &app) {
         << "    = and - to control the explosion radius." << std::endl;
     std::cout << "Use '.' to toggle streamline simplification." << std::endl;
 
+    seed_point_threshold = app.res.vf_tex.longest_vector * 0.5f;
+
     if (!allocate_graphics_resources()) {
         std::cerr << "Faield to allocate graphics resources?" << std::endl;
     }
@@ -426,6 +428,40 @@ __device__ glm::vec3 evaluate_vector_delta(const glm::vec3 &p, CUDATexture3D vf)
     return one_over_eps * glm::vec3(v.x - vx.x, v.y - vy.y, v.z - vz.z);
 }
 
+__device__ glm::vec3 evaluate_vector_slope(const glm::vec3 &p, CUDATexture3D vf, int axis)
+{
+    constexpr float epsilon = 0.01f;
+    constexpr float one_over_eps = 1.0f / epsilon;
+
+    float4 v = tex3D<float4>(vf.texture, p.x, p.y, p.z);
+    float4 vv;
+
+    switch (axis)
+    {
+        case 0:
+            vv = tex3D<float4>(vf.texture, p.x - epsilon, p.y, p.z);
+            break;
+
+        case 1:
+            vv = tex3D<float4>(vf.texture, p.x, p.y - epsilon, p.z);
+            break;
+
+        case 2:
+            vv = tex3D<float4>(vf.texture, p.x, p.y, p.z - epsilon);
+            break;
+    }
+
+    return one_over_eps * glm::vec3(v.x - vv.x, v.y - vv.y, v.z - vv.z);
+}
+
+__device__ float evaluate_jacobian_det(const glm::vec3 &p, CUDATexture3D vf)
+{
+    glm::mat3 m(evaluate_vector_slope(p, vf, 0), 
+        evaluate_vector_slope(p, vf, 1), 
+        evaluate_vector_slope(p, vf, 2));
+    return glm::determinant(m);
+}
+
 __device__ glm::vec3 evaluate_vector_delta_delta(const glm::vec3 &p, CUDATexture3D vf)
 {
     constexpr float epsilon = 0.01f;
@@ -517,7 +553,8 @@ __global__ void trace_and_generate_kernel(glm::vec3 *seed_points,
             set_vec3(streamline_vbo_data, line_start + i * 12 + 6, sp);
             set_xyz(streamline_vbo_data, line_start + i * 12 + 9, color.x, color.y, color.z);
 
-            float metric = glm::length(evaluate_vector_delta(sp, vf));
+            // float metric = glm::length(evaluate_vector_delta(sp, vf)); 
+            float metric = evaluate_jacobian_det(sp, vf);
             maximum_metric = glm::max(metric, maximum_metric);
             average_metric += metric;
 
@@ -544,11 +581,11 @@ __global__ void trace_and_generate_kernel(glm::vec3 *seed_points,
         }
 
         // Debug content
-        // average_metric /= (num_lines - 1);
-        // debug[index].index = index;
-        // debug[index].maximum_metric = maximum_metric;
-        // debug[index].average_metric = average_metric;
-        // debug[index].curand = curand_uniform(&curand_state);
+        average_metric /= (num_lines - 1);
+        debug[index].index = index;
+        debug[index].maximum_metric = maximum_metric;
+        debug[index].average_metric = average_metric;
+        debug[index].curand = curand_uniform(&curand_state);
 
         index += gridDim.x * gridDim.y;
     }
@@ -656,6 +693,10 @@ bool StreamLineRenderState::trace_streamlines_adaptive(App &app)
     CHECK_CUDA_ERROR(cudaMemcpy(debug_host, debug, num_seeds * sizeof(TraceInfo), cudaMemcpyDeviceToHost));
 
     // TODO: add/print debug stuffs here...
+    // for (int i = 0; i < seed_points.size(); i++)
+    // {
+    //     std::cout << debug_host[i].average_metric << ", " << debug_host[i].maximum_metric << std::endl;
+    // }
 
     delete[] sp_host;
     delete[] debug_host;
@@ -819,7 +860,7 @@ void StreamLineRenderState::draw_user_controls(App &app)
         {
             if (ImGui::CollapsingHeader("Adaptive mode properties"))
             {
-                should_update |= ImGui::SliderFloat("Seed point generation threshold", &seed_point_threshold, 0.1f, 20.0f);
+                should_update |= ImGui::SliderFloat("Seed point generation threshold", &seed_point_threshold, 0.001f, app.res.vf_tex.longest_vector);
                 should_update |= ImGui::SliderFloat("Adaptive explosion radius", &adaptive_explosion_radius, 1.0f, 20.0f);
                 should_update |= ImGui::SliderInt("Number of explosions", &num_explosion, 1, 10);
                 should_update |= ImGui::SliderInt("Explosion cooldown counter", &explosion_cooldown_counter, 1, 200);

@@ -39,30 +39,35 @@ bool initialize_yylvv_contents(int argc, char *argv[], YYLVVRes &res) {
         std::cerr << "Wrong number of arguments: " << argc << "?" << std::endl;
         return false;
     }
-    // NRRD nrrd;
-    // if (!nrrd.load_from_file(argv[1])) {
-    //     std::cerr << "Cannot load NRRD?" << std::endl;
-    //     return false;
-    // }
-    // std::cout << "NRRD loaded. Size: " << nrrd.sizes[0] << ", " << nrrd.sizes[1] << ", " << nrrd.sizes[2] << ", " << nrrd.sizes[3] << std::endl;
-    // std::cout << "Loading vector field into CUDA 3D texture..." << std::endl;
-    // if (!nrrd_to_3d_texture(nrrd, res.vf_tex)) {
-    //     std::cerr << "Cannot transform NRRD into 3D texture?" << std::endl;
-    //     return false;
-    // }
+    NRRD nrrd;
+    if (!nrrd.load_from_file(argv[1])) {
+        std::cerr << "Cannot load NRRD?" << std::endl;
+        return false;
+    }
+    std::cout << "NRRD loaded. Size: " << nrrd.sizes[0] << ", " << nrrd.sizes[1] << ", " << nrrd.sizes[2] << ", " << nrrd.sizes[3] << std::endl;
+    std::cout << "Loading vector field into CUDA 3D texture..." << std::endl;
+    if (!nrrd_to_3d_texture(nrrd, res.vf_tex)) {
+        std::cerr << "Cannot transform NRRD into 3D texture?" << std::endl;
+        return false;
+    }
 
     // Test read plain text
-    PlainText plain_text;
-    if (!plain_text.load_from_file("bluntfin.txt"))
-    {
-        std::cerr << "Failed to load from file?" << std::endl;
-        return false;
-    }
-    if (!plain_text_to_3d_texture(plain_text, res.vf_tex))
-    {
-        std::cerr << "Cannot transform plain text data into 3D texture?" << std::endl;
-        return false;
-    }
+    // PlainText plain_text;
+    // if (!plain_text.load_from_file("bluntfin.txt"))
+    // {
+    //     std::cerr << "Failed to load from file?" << std::endl;
+    //     return false;
+    // }
+    // if (!plain_text.load_from_file("rectgrid2.txt"))
+    // {
+    //     std::cerr << "Failed to load from file?" << std::endl;
+    //     return false;
+    // }
+    // if (!plain_text_to_3d_texture(plain_text, res.vf_tex))
+    // {
+    //     std::cerr << "Cannot transform plain text data into 3D texture?" << std::endl;
+    //     return false;
+    // }
 
     std::cout << "Creating YYLVV window and OpenGL context." << std::endl;
     res.window = create_yylvv_window(1024, 768, "YYLVV visualizer");

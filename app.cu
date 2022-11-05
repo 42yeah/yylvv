@@ -199,14 +199,17 @@ void App::key_callback(GLFWwindow *window, int key, int scancode, int action, in
     {
         case GLFW_KEY_L:
             switch_state(std::make_shared<LineGlyphRenderState>());
+            visualization_mode = 1;
             break;
 
         case GLFW_KEY_G:
             switch_state(std::make_shared<ArrowGlyphRenderState>());
+            visualization_mode = 2;
             break;
 
         case GLFW_KEY_Z:
             switch_state(std::make_shared<StreamLineRenderState>());
+            visualization_mode = 3;
             break;
 
         case GLFW_KEY_SPACE:

@@ -52,13 +52,23 @@ bool initialize_yylvv_contents(int argc, char *argv[], YYLVVRes &res) {
     }
 
     // Test read plain text
-    // PlainText plain_text;
+    PlainText plain_text;
     // if (!plain_text.load_from_file("bluntfin.txt"))
     // {
     //     std::cerr << "Failed to load from file?" << std::endl;
     //     return false;
     // }
     // if (!plain_text.load_from_file("rectgrid2.txt"))
+    // {
+    //     std::cerr << "Failed to load from file?" << std::endl;
+    //     return false;
+    // }
+    // if (!plain_text.load_from_file("tierny.txt"))
+    // {
+    //     std::cerr << "Failed to load from file?" << std::endl;
+    //     return false;
+    // }
+    // if (!plain_text.load_from_file("tierny2.txt"))
     // {
     //     std::cerr << "Failed to load from file?" << std::endl;
     //     return false;

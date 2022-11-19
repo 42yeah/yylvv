@@ -28,6 +28,7 @@ private:
     bool generate_seed_points_line(glm::vec3 a, glm::vec3 b, int num_seeds);
     bool generate_seed_points_rect(glm::vec3 a, glm::vec3 b, int num_seeds);
     bool trace_streamlines(App &app);
+    bool finalize_seed_points(App &app);
 
     bool trace_streamlines_adaptive(App &app);
     bool simplify_streamlines();
@@ -59,6 +60,12 @@ private:
     int seed_points_strategy;
     glm::vec3 seed_begin;
     glm::vec3 seed_end;
+
+    // seed point rendering
+    bool render_seed_points;
+    float point_size;
+    std::shared_ptr<VAO> seed_points_vao;
+    std::shared_ptr<Program> seed_points_program;
 };
 
 #endif

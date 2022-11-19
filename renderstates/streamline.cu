@@ -28,7 +28,11 @@ StreamLineRenderState::StreamLineRenderState() : num_seeds(200),
         distortion_threshold(1.01f),
         seed_points_strategy(0),
         seed_begin(0.0f),
-        seed_end(0.0f)
+        seed_end(0.0f),
+        render_seed_points(false),
+        seed_points_vao(nullptr),
+        seed_points_program(nullptr),
+        point_size(3.0f)
 {
 
 }
@@ -78,11 +82,28 @@ bool StreamLineRenderState::allocate_graphics_resources() {
     std::cout << "Linking OpenGL VAO with CUDA resource." << std::endl;
     CHECK_CUDA_ERROR(cudaGraphicsGLRegisterBuffer(&streamline_graphics_resource, streamline_vao->vbo, cudaGraphicsMapFlagsNone));
     streamline_program = Program::make_program("shaders/vectors.vert", "shaders/vectors.frag");
+    
     if (!streamline_program || !streamline_program->valid) 
     {
         std::cerr << "Invalid streamline program?" << std::endl;
         return false;
     }
+
+    seed_points_program = Program::make_program("shaders/seedpoints.vert", "shaders/seedpoints.frag");
+
+    if (!seed_points_program || !seed_points_program->valid) 
+    {
+        std::cerr << "Invalid seed point program?" << std::endl;
+        return false;
+    }
+
+    empty_data.reset(new float[3 * num_seeds]);
+    seed_points_vao = VAO::make_vao(empty_data.get(), sizeof(glm::vec3) * num_seeds, GL_DYNAMIC_DRAW,
+                                   {
+                                       VertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 3, nullptr)
+                                   },
+                                   GLDrawCall(GL_POINTS, 0, num_seeds));
+
     return true;
 }
 
@@ -100,6 +121,16 @@ void StreamLineRenderState::render(App &app)
     glUniformMatrix4fv(streamline_program->at("view"), 1, GL_FALSE, glm::value_ptr(app.camera.view));
     glUniformMatrix4fv(streamline_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(app.camera.perspective));
     streamline_vao->draw();
+
+    if (render_seed_points)
+    {
+        glPointSize(point_size);
+        seed_points_program->use();
+        glUniformMatrix4fv(seed_points_program->at("model"), 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
+        glUniformMatrix4fv(seed_points_program->at("view"), 1, GL_FALSE, glm::value_ptr(app.camera.view));
+        glUniformMatrix4fv(seed_points_program->at("perspective"), 1, GL_FALSE, glm::value_ptr(app.camera.perspective));
+        seed_points_vao->draw();
+    }
 }
 
 void StreamLineRenderState::process_events(App &app) 
@@ -300,11 +331,15 @@ bool StreamLineRenderState::generate_streamlines(App &app)
             return false;
         }
     }
+    if (!finalize_seed_points(app))
+    {
+        std::cerr << "Failed to finalize seed points?" << std::endl;
+    }
     if (do_simplify)
     {
         if (!simplify_streamlines())
         {
-            std::cout << "Failed to simplify streamlines?" << std::endl;
+            std::cerr << "Failed to simplify streamlines?" << std::endl;
         }
     }
 
@@ -815,6 +850,20 @@ bool StreamLineRenderState::simplify_streamlines()
     return true;
 }
 
+bool StreamLineRenderState::finalize_seed_points(App &app)
+{
+    if (!seed_points_vao)
+    {
+        return false;
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, seed_points_vao->vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(glm::vec3) * seed_points.size(), seed_points.data());
+    seed_points_vao->draw_call.size = seed_points.size();
+
+    return true;
+}
+
 
 void StreamLineRenderState::draw_user_controls(App &app)
 {
@@ -874,6 +923,12 @@ void StreamLineRenderState::draw_user_controls(App &app)
             {
                 should_update |= ImGui::SliderFloat("Simplification threshold", &distortion_threshold, 1.001f, 1.5f);
             }
+        }
+
+        ImGui::Checkbox("Render seed points", &render_seed_points);
+        if (render_seed_points)
+        {
+            ImGui::SliderFloat("Seed point point size", &point_size, 1.0f, 20.0f);
         }
         
     }

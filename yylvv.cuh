@@ -64,16 +64,16 @@ bool initialize_yylvv_contents(int argc, char *argv[], YYLVVRes &res) {
     //     std::cerr << "Failed to load from file?" << std::endl;
     //     return false;
     // }
-    if (!plain_text.load_from_file("tierny.txt"))
-    {
-        std::cerr << "Failed to load from file?" << std::endl;
-        return false;
-    }
-    // if (!plain_text.load_from_file("tierny2.txt"))
+    // if (!plain_text.load_from_file("tierny.txt"))
     // {
     //     std::cerr << "Failed to load from file?" << std::endl;
     //     return false;
     // }
+    if (!plain_text.load_from_file("tierny2.txt"))
+    {
+        std::cerr << "Failed to load from file?" << std::endl;
+        return false;
+    }
     if (!plain_text_to_3d_texture(plain_text, res.vf_tex))
     {
         std::cerr << "Cannot transform plain text data into 3D texture?" << std::endl;

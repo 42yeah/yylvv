@@ -541,7 +541,7 @@ __device__ bool length_metric(const glm::vec3 &sp, const CUDATexture3D &vf, floa
     return glm::length(evaluate_vector_delta(sp, vf)) > threshold;
 }
 
-__device__ bool critical_metric(const glm::vec3 &sp, const CUDATexture3D &vf, float threshold)
+__device__ bool critical_metric(const glm::vec3 &sp, const CUDATexture3D &vf, float threshold, glm::vec3 &vdir, glm::vec3 &right, glm::vec3 &up)
 {
     float4 v = tex3D<float4>(vf.texture, sp.x, sp.y, sp.z);
 
@@ -559,15 +559,15 @@ __device__ bool critical_metric(const glm::vec3 &sp, const CUDATexture3D &vf, fl
     }
 
     // Step 3: determine if vectors around it are too poorly aligned
-    glm::vec3 vdir = glm::normalize(glm::vec3(v.x, v.y, v.z));
+    vdir = glm::normalize(glm::vec3(v.x, v.y, v.z));
     float test_dot = fabs(glm::dot(vdir, glm::vec3(0.0f, 1.0f, 0.0f)));
     glm::vec3 fake_up = glm::vec3(0.0f, 1.0f, 0.0f);
     if (test_dot > 0.95f)
     {
         fake_up = glm::vec3(0.0f, 0.0f, 1.0f);
     }
-    glm::vec3 right = glm::normalize(glm::cross(vdir, fake_up));
-    glm::vec3 up = glm::normalize(glm::cross(right, vdir));
+    right = glm::normalize(glm::cross(vdir, fake_up));
+    up = glm::normalize(glm::cross(right, vdir));
 
     constexpr float sample_scale = 1.0f;
     float a = fabs(glm::dot(vdir, glm::normalize(float4_to_vec3(sample_texture(vf.texture, sp + sample_scale * v.w * right)))));
@@ -577,6 +577,96 @@ __device__ bool critical_metric(const glm::vec3 &sp, const CUDATexture3D &vf, fl
 
     // Step 4: Check if they have poor alignment
     return ((a + b + c + d) * 0.25f < threshold);
+}
+
+__device__ glm::vec3 seed_uniform_sphere(const glm::vec3 &sp, float explosion_radius, curandState *curand_state)
+{
+    float theta = 2.0f * glm::pi<float>() * curand_uniform(curand_state);
+    float phi = acosf(1.0f - 2.0f * curand_uniform(curand_state));
+    glm::vec3 offset_dir(sinf(phi) * cosf(theta), sinf(phi) * sinf(theta), cosf(phi));
+    return sp + offset_dir * explosion_radius;
+}
+
+__device__ glm::vec3 random_direction(curandState *curand_state)
+{
+    float t = 2.0f * glm::pi<float>() * curand_uniform(curand_state);
+    float p = acosf(1.0f - 2.0f * curand_uniform(curand_state));
+    return glm::vec3(sinf(p) * cosf(t), sinf(p) * sinf(t), cosf(p));
+}
+
+__device__ glm::vec3 evaluate_vector_slope_across_plane(const glm::vec3 &p, const glm::vec3 &right, const glm::vec3 &up, CUDATexture3D vf, int axis)
+{
+    constexpr float epsilon = 0.01f;
+    constexpr float one_over_eps = 1.0f / epsilon;
+
+    float4 v = tex3D<float4>(vf.texture, p.x, p.y, p.z);
+    float4 vv;
+    glm::vec3 p0 = p;
+
+    switch (axis)
+    {
+        case 0:
+            p0 -= right * epsilon;
+            vv = tex3D<float4>(vf.texture, p0.x, p0.y, p0.z);
+            break;
+
+        case 1:
+            p0 -= up * epsilon;
+            vv = tex3D<float4>(vf.texture, p0.x, p0.y, p0.z);
+            break;
+    }
+
+    return one_over_eps * glm::vec3(v.x - vv.x, v.y - vv.y, v.z - vv.z);
+}
+
+__device__ glm::vec3 seed_flow_guided(const glm::vec3 &sp, 
+                                      float explosion_radius, 
+                                      curandState *curand_state, 
+                                      const glm::vec3 &vdir, 
+                                      const glm::vec3 &right, 
+                                      const glm::vec3 &up,
+                                      CUDATexture3D vf,
+                                      const glm::vec3 &rand_dir,
+                                      int i,
+                                      int n)
+{
+    float theta = acosf(vdir.y) + 0.001f;
+
+    float phi;
+    if (vdir.x >= 0.0f)
+    {
+        phi = acosf(glm::clamp(vdir.z / sinf(theta), -1.0f, 1.0f));
+    }
+    else
+    {
+        phi = acosf(glm::clamp(-vdir.z / sinf(theta), -1.0f, 1.0f)) + glm::pi<float>();
+    }
+
+    glm::mat3 rotate(cosf(phi), cosf(theta) * sinf(phi), sinf(theta) * sinf(phi),
+        0.0f, -sinf(theta), cosf(theta),
+        -sinf(phi), cosf(theta) * cosf(phi), sinf(theta) * cosf(phi));
+    rotate = glm::transpose(rotate);
+
+    // Align gradients with vector field vector
+    glm::vec3 a = rotate * evaluate_vector_slope_across_plane(sp, right, up, vf, 0);
+    glm::vec3 b = rotate * evaluate_vector_slope_across_plane(sp, right, up, vf, 1);
+
+    // 3b1b's quick trick for computing eigenvalues
+    float m = (a.x + b.y) / 2.0f;
+    float p = a.x * b.y - a.y * b.x;
+
+    // If there is no imaginary part, we seed it in a circular manner; 
+    // otherwise we assume it's a center, and seed it in a straight line (in a random direction.)
+    float s = (float) i / n;
+    if (m * m - p >= 0.0f)
+    {
+        s *= 2.0f * glm::pi<float>();
+        return sp + explosion_radius * (cosf(s) * right + sinf(s) * up);
+    }
+    else
+    {
+        return sp + explosion_radius * (float) (i + 1) * rand_dir;
+    }
 }
 
 __global__ void trace_and_generate_kernel(glm::vec3 *seed_points, 
@@ -642,7 +732,10 @@ __global__ void trace_and_generate_kernel(glm::vec3 *seed_points,
             // maximum_metric = glm::max(metric, maximum_metric);
             // average_metric += metric;
             // bool is_critical = jacobian_metric(sp, vf, threshold);
-            bool is_critical = critical_metric(sp, vf, threshold);
+
+            // Vector direction
+            glm::vec3 vdir, right, up;
+            bool is_critical = critical_metric(sp, vf, threshold, vdir, right, up);
 
             if (is_critical && explosion_cooldown <= 0)
             {
@@ -656,12 +749,17 @@ __global__ void trace_and_generate_kernel(glm::vec3 *seed_points,
                     continue;
                 }
 
-                for (int j = 0; j < glm::min(num_maximum_seeds - new_seed_point_index, num_explosion); j++)
+                int num_new_seeds = glm::min(num_maximum_seeds - new_seed_point_index, num_explosion);
+                glm::vec3 rdir = random_direction(&curand_state);
+                for (int j = 0; j < num_new_seeds; j++)
                 {
-                    float theta = 2.0f * glm::pi<float>() * curand_uniform(&curand_state);
-                    float phi = acosf(1.0f - 2.0f * curand_uniform(&curand_state));
-                    glm::vec3 offset_dir(sinf(phi) * cosf(theta), sinf(phi) * sinf(theta), cosf(phi));
-                    seed_points[new_seed_point_index + j] = sp + offset_dir * explosion_radius;
+                    // seed_points[new_seed_point_index + j] = seed_uniform_sphere(sp, explosion_radius, &curand_state);
+                    seed_points[new_seed_point_index + j] = seed_flow_guided(sp, 
+                        explosion_radius, 
+                        &curand_state, 
+                        vdir, right, up, 
+                        vf, rdir,
+                        j, num_new_seeds);
                 }
             }
             explosion_cooldown--;

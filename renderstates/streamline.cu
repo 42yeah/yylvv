@@ -21,9 +21,9 @@ StreamLineRenderState::StreamLineRenderState() : num_seeds(200),
         seeding_plane_x(0.0f),
         adaptive_mode(false),
         adaptive_explosion_radius(1.0f),
-        num_explosion(1),
-        explosion_cooldown_counter(10),
-        seed_point_threshold(10.0f),
+        num_explosion(3),
+        explosion_cooldown_counter(100),
+        seed_point_threshold(0.5f),
         do_simplify(false),
         distortion_threshold(1.01f),
         seed_points_strategy(0),
@@ -51,7 +51,7 @@ void StreamLineRenderState::initialize(App &app) {
         << "    = and - to control the explosion radius." << std::endl;
     std::cout << "Use '.' to toggle streamline simplification." << std::endl;
 
-    seed_point_threshold = app.res.vf_tex.longest_vector * 0.5f;
+    // seed_point_threshold = app.res.vf_tex.longest_vector * 0.5f;
 
     if (!allocate_graphics_resources()) {
         std::cerr << "Faield to allocate graphics resources?" << std::endl;
@@ -530,6 +530,55 @@ struct TraceInfo
     float global_distortion;
 };
 
+__device__ bool jacobian_metric(const glm::vec3 &sp, const CUDATexture3D &vf, float threshold)
+{
+    return evaluate_jacobian_det(sp, vf) > threshold;
+}
+
+// I think this doesn't make sense
+__device__ bool length_metric(const glm::vec3 &sp, const CUDATexture3D &vf, float threshold)
+{
+    return glm::length(evaluate_vector_delta(sp, vf)) > threshold;
+}
+
+__device__ bool critical_metric(const glm::vec3 &sp, const CUDATexture3D &vf, float threshold)
+{
+    float4 v = tex3D<float4>(vf.texture, sp.x, sp.y, sp.z);
+
+    // Step 1: determine if this is a dead zone
+    if (v.w == 0.0f)
+    {
+        return false;
+    }
+
+    // Step 2: determine if vector magnitude is way too small (which means both x, y, and z are minimal)
+    constexpr float infinitesimal_scale = 0.1f;
+    if (v.w < infinitesimal_scale * vf.average_vector)
+    {
+        return true;
+    }
+
+    // Step 3: determine if vectors around it are too poorly aligned
+    glm::vec3 vdir = glm::normalize(glm::vec3(v.x, v.y, v.z));
+    float test_dot = fabs(glm::dot(vdir, glm::vec3(0.0f, 1.0f, 0.0f)));
+    glm::vec3 fake_up = glm::vec3(0.0f, 1.0f, 0.0f);
+    if (test_dot > 0.95f)
+    {
+        fake_up = glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+    glm::vec3 right = glm::normalize(glm::cross(vdir, fake_up));
+    glm::vec3 up = glm::normalize(glm::cross(right, vdir));
+
+    constexpr float sample_scale = 1.0f;
+    float a = fabs(glm::dot(vdir, glm::normalize(float4_to_vec3(sample_texture(vf.texture, sp + sample_scale * v.w * right)))));
+    float b = fabs(glm::dot(vdir, glm::normalize(float4_to_vec3(sample_texture(vf.texture, sp + sample_scale * v.w * up)))));
+    float c = fabs(glm::dot(vdir, glm::normalize(float4_to_vec3(sample_texture(vf.texture, sp - sample_scale * v.w * right)))));
+    float d = fabs(glm::dot(vdir, glm::normalize(float4_to_vec3(sample_texture(vf.texture, sp - sample_scale * v.w * up)))));
+
+    // Step 4: Check if they have poor alignment
+    return ((a + b + c + d) * 0.25f < threshold);
+}
+
 __global__ void trace_and_generate_kernel(glm::vec3 *seed_points, 
                                           int *num_current_seeds,
                                           int num_maximum_seeds, 
@@ -546,6 +595,7 @@ __global__ void trace_and_generate_kernel(glm::vec3 *seed_points,
                                           float explosion_radius,
                                           int num_explosion,
                                           int explosion_cooldown_counter,
+                                          int initial_explosion_cooldown,
                                           TraceInfo *debug)
 {
     int index = blockIdx.y * gridDim.x + blockIdx.x + trace_start;
@@ -560,7 +610,7 @@ __global__ void trace_and_generate_kernel(glm::vec3 *seed_points,
         glm::vec3 sp = seed_points[index];
         int line_start = index * streamline_stride;
 
-        int explosion_cooldown = 0;
+        int explosion_cooldown = initial_explosion_cooldown;
 
         // Debug info
         float maximum_metric = 0.0f;
@@ -587,13 +637,14 @@ __global__ void trace_and_generate_kernel(glm::vec3 *seed_points,
 
             set_vec3(streamline_vbo_data, line_start + i * 12 + 6, sp);
             set_xyz(streamline_vbo_data, line_start + i * 12 + 9, color.x, color.y, color.z);
+ 
+            // float metric = jacobian_metric(sp, vf);
+            // maximum_metric = glm::max(metric, maximum_metric);
+            // average_metric += metric;
+            // bool is_critical = jacobian_metric(sp, vf, threshold);
+            bool is_critical = critical_metric(sp, vf, threshold);
 
-            // float metric = glm::length(evaluate_vector_delta(sp, vf)); 
-            float metric = evaluate_jacobian_det(sp, vf);
-            maximum_metric = glm::max(metric, maximum_metric);
-            average_metric += metric;
-
-            if (metric > threshold && explosion_cooldown == 0)
+            if (is_critical && explosion_cooldown <= 0)
             {
                 // Generate a seed point directly above the current sample point
                 int new_seed_point_index = atomicAdd(num_current_seeds, num_explosion);
@@ -613,13 +664,16 @@ __global__ void trace_and_generate_kernel(glm::vec3 *seed_points,
                     seed_points[new_seed_point_index + j] = sp + offset_dir * explosion_radius;
                 }
             }
+            explosion_cooldown--;
         }
 
         // Debug content
         average_metric /= (num_lines - 1);
         debug[index].index = index;
-        debug[index].maximum_metric = maximum_metric;
-        debug[index].average_metric = average_metric;
+        // debug[index].maximum_metric = maximum_metric;
+        // debug[index].average_metric = average_metric;
+        debug[index].maximum_metric = 0.0f;
+        debug[index].average_metric = 0.0f;
         debug[index].curand = curand_uniform(&curand_state);
 
         index += gridDim.x * gridDim.y;
@@ -659,6 +713,7 @@ bool StreamLineRenderState::trace_streamlines_adaptive(App &app)
 
     int trace_start = 0;
     int trace_end = n_initial_seeds - 1;
+    int initial_explosion_cooldown = 0;
     
     while (access_data_on_device(num_seeds_cuda, 0) < num_seeds)
     {
@@ -674,7 +729,12 @@ bool StreamLineRenderState::trace_streamlines_adaptive(App &app)
             trace_start, trace_end,
             vbo_data, app.res.vf_tex, simulation_dt, app.ctf_tex_cuda, app.delta_wing_bounding_box,
             use_runge_kutta_4_integrator, seed_point_threshold, adaptive_explosion_radius, num_explosion,
-            explosion_cooldown_counter, debug);
+            explosion_cooldown_counter, initial_explosion_cooldown, debug);
+
+        if (initial_explosion_cooldown == 0)
+        {
+            initial_explosion_cooldown = explosion_cooldown_counter;
+        }
 
         CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
@@ -705,7 +765,7 @@ bool StreamLineRenderState::trace_streamlines_adaptive(App &app)
             trace_start, trace_end,
             vbo_data, app.res.vf_tex, simulation_dt, app.ctf_tex_cuda, app.delta_wing_bounding_box,
             use_runge_kutta_4_integrator, seed_point_threshold, adaptive_explosion_radius, num_explosion,
-            explosion_cooldown_counter, debug);
+            explosion_cooldown_counter, explosion_cooldown_counter, debug);
         CHECK_CUDA_ERROR(cudaDeviceSynchronize());
     }
 
@@ -909,10 +969,11 @@ void StreamLineRenderState::draw_user_controls(App &app)
         {
             if (ImGui::CollapsingHeader("Adaptive mode properties"))
             {
-                should_update |= ImGui::SliderFloat("Seed point generation threshold", &seed_point_threshold, 0.001f, app.res.vf_tex.longest_vector);
+                // should_update |= ImGui::SliderFloat("Seed point generation threshold", &seed_point_threshold, 0.001f, app.res.vf_tex.longest_vector);
+                should_update |= ImGui::SliderFloat("Seed point generation threshold", &seed_point_threshold, 0.001f, 1.0f);
                 should_update |= ImGui::SliderFloat("Adaptive explosion radius", &adaptive_explosion_radius, 1.0f, 20.0f);
                 should_update |= ImGui::SliderInt("Number of explosions", &num_explosion, 1, 10);
-                should_update |= ImGui::SliderInt("Explosion cooldown counter", &explosion_cooldown_counter, 1, 200);
+                should_update |= ImGui::SliderInt("Explosion cooldown counter", &explosion_cooldown_counter, 1, 4000);
             }
         }
 

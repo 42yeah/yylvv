@@ -17,6 +17,7 @@ struct CUDATexture3D {
     cudaArray_t array;
     cudaExtent extent;
     float longest_vector;
+    float average_vector;
 };
 
 struct YYLVVRes {
@@ -39,17 +40,17 @@ bool initialize_yylvv_contents(int argc, char *argv[], YYLVVRes &res) {
         std::cerr << "Wrong number of arguments: " << argc << "?" << std::endl;
         return false;
     }
-    NRRD nrrd;
-    if (!nrrd.load_from_file(argv[1])) {
-        std::cerr << "Cannot load NRRD?" << std::endl;
-        return false;
-    }
-    std::cout << "NRRD loaded. Size: " << nrrd.sizes[0] << ", " << nrrd.sizes[1] << ", " << nrrd.sizes[2] << ", " << nrrd.sizes[3] << std::endl;
-    std::cout << "Loading vector field into CUDA 3D texture..." << std::endl;
-    if (!nrrd_to_3d_texture(nrrd, res.vf_tex)) {
-        std::cerr << "Cannot transform NRRD into 3D texture?" << std::endl;
-        return false;
-    }
+    // NRRD nrrd;
+    // if (!nrrd.load_from_file(argv[1])) {
+    //     std::cerr << "Cannot load NRRD?" << std::endl;
+    //     return false;
+    // }
+    // std::cout << "NRRD loaded. Size: " << nrrd.sizes[0] << ", " << nrrd.sizes[1] << ", " << nrrd.sizes[2] << ", " << nrrd.sizes[3] << std::endl;
+    // std::cout << "Loading vector field into CUDA 3D texture..." << std::endl;
+    // if (!nrrd_to_3d_texture(nrrd, res.vf_tex)) {
+    //     std::cerr << "Cannot transform NRRD into 3D texture?" << std::endl;
+    //     return false;
+    // }
 
     // Test read plain text
     PlainText plain_text;
@@ -63,21 +64,21 @@ bool initialize_yylvv_contents(int argc, char *argv[], YYLVVRes &res) {
     //     std::cerr << "Failed to load from file?" << std::endl;
     //     return false;
     // }
-    // if (!plain_text.load_from_file("tierny.txt"))
-    // {
-    //     std::cerr << "Failed to load from file?" << std::endl;
-    //     return false;
-    // }
+    if (!plain_text.load_from_file("tierny.txt"))
+    {
+        std::cerr << "Failed to load from file?" << std::endl;
+        return false;
+    }
     // if (!plain_text.load_from_file("tierny2.txt"))
     // {
     //     std::cerr << "Failed to load from file?" << std::endl;
     //     return false;
     // }
-    // if (!plain_text_to_3d_texture(plain_text, res.vf_tex))
-    // {
-    //     std::cerr << "Cannot transform plain text data into 3D texture?" << std::endl;
-    //     return false;
-    // }
+    if (!plain_text_to_3d_texture(plain_text, res.vf_tex))
+    {
+        std::cerr << "Cannot transform plain text data into 3D texture?" << std::endl;
+        return false;
+    }
 
     std::cout << "Creating YYLVV window and OpenGL context." << std::endl;
     res.window = create_yylvv_window(1024, 768, "YYLVV visualizer");
@@ -91,6 +92,7 @@ bool initialize_yylvv_contents(int argc, char *argv[], YYLVVRes &res) {
 bool nrrd_to_3d_texture(NRRD &nrrd, CUDATexture3D &ret_tex) {
     std::unique_ptr<float4[]> vf_float4 = std::make_unique<float4[]>(nrrd.sizes[1] * nrrd.sizes[2] * nrrd.sizes[3]);
     float longest = 0.0f;
+    double sum = 0.0;
     for (int z = 0; z < nrrd.sizes[3]; z++) {
         for (int y = 0; y < nrrd.sizes[2]; y++) {
             for (int x = 0; x < nrrd.sizes[1]; x++) {
@@ -103,6 +105,7 @@ bool nrrd_to_3d_texture(NRRD &nrrd, CUDATexture3D &ret_tex) {
                 if (longest < vl) {
                     longest = vl;
                 }
+                sum += vl;
                 vf_float4[idx] = make_float4(vx, vy, vz, vl);
             }
         }
@@ -147,6 +150,7 @@ bool nrrd_to_3d_texture(NRRD &nrrd, CUDATexture3D &ret_tex) {
     ret_tex.array = vf_float4_cuda;
     ret_tex.extent = extent;
     ret_tex.longest_vector = longest;
+    ret_tex.average_vector = (float) (sum / (nrrd.sizes[1] * nrrd.sizes[2] * nrrd.sizes[3]));
     return true;
 }
 
@@ -160,6 +164,7 @@ bool plain_text_to_3d_texture(PlainText &plain_text, CUDATexture3D &ret_tex)
 
     std::unique_ptr<float4[]> vf_float4 = std::make_unique<float4[]>(plain_text.sizes.x * plain_text.sizes.y * plain_text.sizes.z);
     float longest = 0.0f;
+    double sum = 0.0;
 
     for (int z = 0; z < plain_text.sizes.z; z++) 
     {
@@ -178,6 +183,7 @@ bool plain_text_to_3d_texture(PlainText &plain_text, CUDATexture3D &ret_tex)
                 {
                     longest = vl;
                 }
+                sum += vl;
 
                 // std::cout << x << ", " << y << ", " << z << " is " << vl << " long" << std::endl;
                 vf_float4[idx] = make_float4(vx, vy, vz, vl);
@@ -226,6 +232,7 @@ bool plain_text_to_3d_texture(PlainText &plain_text, CUDATexture3D &ret_tex)
     ret_tex.array = vf_float4_cuda;
     ret_tex.extent = extent;
     ret_tex.longest_vector = longest;
+    ret_tex.average_vector = (float) (sum / (plain_text.sizes.x * plain_text.sizes.y * plain_text.sizes.z));
 
     return true;
 }

@@ -56,4 +56,14 @@ __device__ inline float4 operator+(const float4 &a, const float4 &b)
     return make_float4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w);
 }
 
+__device__ inline glm::vec3 float4_to_vec3(float4 vec)
+{
+    return glm::vec3(vec.x, vec.y, vec.z);
+}
+
+__device__ inline float4 sample_texture(cudaTextureObject_t tex, const glm::vec3 &p)
+{
+    return tex3D<float4>(tex, p.x, p.y, p.z);
+}
+
 #endif

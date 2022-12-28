@@ -268,22 +268,18 @@ void App::handle_continuous_key_events()
     if (glfwGetKey(window, GLFW_KEY_W)) 
     {
         camera.eye += camera.front * camera.speed * delta_time;
-        camera.update_components(screen_width, screen_height);
     }
     if (glfwGetKey(res.window, GLFW_KEY_S)) 
     {
         camera.eye -= camera.front * camera.speed * delta_time;
-        camera.update_components(screen_width, screen_height);
     }
     if (glfwGetKey(res.window, GLFW_KEY_A)) 
     {
         camera.eye -= camera.right * camera.speed * delta_time;
-        camera.update_components(screen_width, screen_height);
     }
     if (glfwGetKey(res.window, GLFW_KEY_D)) 
     {
         camera.eye += camera.right * camera.speed * delta_time;
-        camera.update_components(screen_width, screen_height);
     }
 }
 
@@ -309,6 +305,10 @@ void App::loop()
         {
             render_state->process_events(*this);
         }
+
+        glfwGetFramebufferSize(window, &screen_width, &screen_height);
+        glViewport(0, 0, screen_width, screen_height);
+        camera.update_components(screen_width, screen_height);
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -390,7 +390,7 @@ void App::draw_user_controls()
 
     ImGui::SetNextWindowPos({0, 0}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({220, 200}, ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Streamline Visualizations"))
+    if (ImGui::Begin("Visualizations"))
     {
         ImGui::Text("Visualization mode");
         ImGui::SetNextItemWidth(-FLT_MIN);

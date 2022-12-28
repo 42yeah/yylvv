@@ -69,7 +69,14 @@ bool initialize_yylvv_contents(int argc, char *argv[], YYLVVRes &res) {
     //     std::cerr << "Failed to load from file?" << std::endl;
     //     return false;
     // }
-    if (!plain_text.load_from_file("tierny2.txt"))
+    // if (!plain_text.load_from_file("tierny2.txt"))
+    // {
+    //     std::cerr << "Failed to load from file?" << std::endl;
+    //     return false;
+    // }
+
+    // PENE 
+    if (!plain_text.load_from_file("separator_hires.txt"))
     {
         std::cerr << "Failed to load from file?" << std::endl;
         return false;
@@ -172,7 +179,7 @@ bool plain_text_to_3d_texture(PlainText &plain_text, CUDATexture3D &ret_tex)
         {
             for (int x = 0; x < plain_text.sizes.x; x++) 
             {
-                int idx = z * plain_text.sizes.z * plain_text.sizes.y + y * plain_text.sizes.x + x;
+                int idx = z * plain_text.sizes.y * plain_text.sizes.x + y * plain_text.sizes.x + x;
                 int pt_idx = idx * 3; // pitched by 3
                 float vx = plain_text.raw_data[pt_idx + 0],
                     vy = plain_text.raw_data[pt_idx + 1],

@@ -269,11 +269,11 @@ bool StreamLineRenderState::generate_seed_points_rect(glm::vec3 a, glm::vec3 b, 
     seed_points.clear();
     int width = (int) sqrtf(num_seeds);
     int height = num_seeds / width;
-    glm::vec3 xz = b - a;
-    xz.y = 0.0f;
+    glm::vec3 xy = b - a;
+    xy.z = 0.0f;
 
-    glm::vec3 xz_steps = xz * ((1.0f) / (width - 1));
-    float y_steps = (b - a).y / (height - 1);
+    glm::vec3 xy_steps = xy * ((1.0f) / (width - 1));
+    float z_steps = (b - a).z / (height - 1);
 
     glm::vec3 current_seed = a;
 
@@ -282,9 +282,9 @@ bool StreamLineRenderState::generate_seed_points_rect(glm::vec3 a, glm::vec3 b, 
         for (int x = 0; x < width; x++)
         {
             seed_points.push_back(current_seed);
-            current_seed += xz_steps;
+            current_seed += xy_steps;
         }
-        current_seed = glm::vec3(a.x, a.y + y_steps * y, a.z);
+        current_seed = glm::vec3(a.x, a.y, a.z + z_steps * y);
     }
     std::cout << "Rectangular seed generation: " << seed_points.size() << " seeds generated." << std::endl;
     return true;

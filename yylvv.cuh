@@ -40,50 +40,44 @@ bool initialize_yylvv_contents(int argc, char *argv[], YYLVVRes &res) {
         std::cerr << "Wrong number of arguments: " << argc << "?" << std::endl;
         return false;
     }
-    // NRRD nrrd;
-    // if (!nrrd.load_from_file(argv[1])) {
-    //     std::cerr << "Cannot load NRRD?" << std::endl;
-    //     return false;
-    // }
-    // std::cout << "NRRD loaded. Size: " << nrrd.sizes[0] << ", " << nrrd.sizes[1] << ", " << nrrd.sizes[2] << ", " << nrrd.sizes[3] << std::endl;
-    // std::cout << "Loading vector field into CUDA 3D texture..." << std::endl;
-    // if (!nrrd_to_3d_texture(nrrd, res.vf_tex)) {
-    //     std::cerr << "Cannot transform NRRD into 3D texture?" << std::endl;
-    //     return false;
-    // }
 
-    // Test read plain text
-    PlainText plain_text;
-    // if (!plain_text.load_from_file("bluntfin.txt"))
-    // {
-    //     std::cerr << "Failed to load from file?" << std::endl;
-    //     return false;
-    // }
-    // if (!plain_text.load_from_file("rectgrid2.txt"))
-    // {
-    //     std::cerr << "Failed to load from file?" << std::endl;
-    //     return false;
-    // }
-    // if (!plain_text.load_from_file("tierny.txt"))
-    // {
-    //     std::cerr << "Failed to load from file?" << std::endl;
-    //     return false;
-    // }
-    // if (!plain_text.load_from_file("tierny2.txt"))
-    // {
-    //     std::cerr << "Failed to load from file?" << std::endl;
-    //     return false;
-    // }
-
-    // PENE 
-    if (!plain_text.load_from_file("separator_hires.txt"))
+    std::string file_name = argv[1];
+    if (ends_with(file_name, ".nrrd"))
     {
-        std::cerr << "Failed to load from file?" << std::endl;
-        return false;
+        NRRD nrrd;
+        if (!nrrd.load_from_file(file_name))
+        {
+            std::cerr << "Cannot load NRRD?" << std::endl;
+            return false;
+        }
+        
+        std::cout << "NRRD loaded. Size: " << nrrd.sizes[0] << ", " << nrrd.sizes[1] << ", " << nrrd.sizes[2] << ", " << nrrd.sizes[3] << std::endl;
+        std::cout << "Loading vector field into CUDA 3D texture..." << std::endl;
+        if (!nrrd_to_3d_texture(nrrd, res.vf_tex))
+        {
+            std::cerr << "Cannot transform NRRD into 3D texture?" << std::endl;
+            return false;
+        }
     }
-    if (!plain_text_to_3d_texture(plain_text, res.vf_tex))
+    else if (ends_with(file_name, ".txt"))
     {
-        std::cerr << "Cannot transform plain text data into 3D texture?" << std::endl;
+        PlainText plain_text;
+
+        if (!plain_text.load_from_file(file_name))
+        {
+            std::cerr << "Failed to load: " << file_name << "?" << std::endl;
+            return false;
+        }
+        
+        if (!plain_text_to_3d_texture(plain_text, res.vf_tex))
+        {
+            std::cerr << "Cannot transform plain text data into 3D texture?" << std::endl;
+            return false;
+        }
+    }
+    else
+    {
+        std::cerr << "Mysterious file type: " << file_name << "?" << std::endl;
         return false;
     }
 

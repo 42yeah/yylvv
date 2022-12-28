@@ -16,7 +16,8 @@ App::App(YYLVVRes &res) : res(res),
     user_interface_mode(false),
     visualization_mode(0),
     should_draw_bounding_box(true),
-    should_draw_delta_wing(true)
+    should_draw_delta_wing(true),
+    should_draw_shadow(true)
 {
     if (!init())
     {
@@ -84,6 +85,9 @@ bool App::init()
         std::cerr << "Cannot link line-drawing program?" << std::endl;
         return false;
     }
+
+    std::cout << "Initializing shadow floor VAO and the framebuffer." << std::endl;
+    // TODO: shadow floor VAO here
 
     std::cout << "Configuring OpenGL & GLFW." << std::endl;
     glEnable(GL_DEPTH_TEST);
@@ -449,6 +453,7 @@ void App::draw_user_controls()
         ImGui::InputFloat2("##pitchyaw", camera_py);
         ImGui::Checkbox("Bounding box", &should_draw_bounding_box);
         ImGui::Checkbox("Delta wing", &should_draw_delta_wing);
+        ImGui::Checkbox("Shadow map", &should_draw_shadow);
 
         if (ImGui::Button("Favorite camera pose"))
         {

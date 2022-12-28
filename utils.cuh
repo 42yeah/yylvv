@@ -66,4 +66,14 @@ __device__ inline float4 sample_texture(cudaTextureObject_t tex, const glm::vec3
     return tex3D<float4>(tex, p.x, p.y, p.z);
 }
 
+inline bool ends_with(const std::string &str, const std::string &suffix)
+{
+    if (str.size() < suffix.size())
+    {
+        return false;
+    }
+
+    return str.substr(str.size() - suffix.size(), suffix.size()) == suffix;
+}
+
 #endif

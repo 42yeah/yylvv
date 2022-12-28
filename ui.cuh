@@ -14,7 +14,8 @@
 #include "renderstates/arrowglyph.cuh"
 #include "renderstates/streamline.cuh"
 
-struct UIRes {
+struct UIRes
+{
     std::shared_ptr<VAO> bounding_box_vao; // VAO for bounding box
     std::shared_ptr<Program> bounding_box_program; // program for line-drawing (without color mapping)
     Camera camera; // camera for seeing things
@@ -52,28 +53,35 @@ void draw_delta_wing(UIRes &ui_res);
 UIRes *bound_ui_res = nullptr;
 YYLVVRes *bound_yylvv_res = nullptr;
 
-void print_controls() {
+void print_controls()
+{
     std::cout << "Use camera to navigate around." << std::endl
             << "Activate line glyph view by pressing button L." << std::endl
             << "Activate arrow glyph view by pressing button G." << std::endl
             << "Activate streamline view by pressing button Z." << std::endl;
 }
 
-void switch_state(YYLVVRes &res, UIRes &ui_res, std::shared_ptr<RenderState> new_state) {
-    if (ui_res.render_state != nullptr) {
+void switch_state(YYLVVRes &res, UIRes &ui_res, std::shared_ptr<RenderState> new_state)
+{
+    if (ui_res.render_state != nullptr)
+    {
         ui_res.render_state->destroy();
     }
     ui_res.render_state = new_state;
     ui_res.render_state->initialize(res, ui_res);
 }
 
-void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
-    if (action != 1) {
+void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
+{
+    if (action != 1)
+    {
         return;
     }
+    
     UIRes &ui_res = *bound_ui_res;
     YYLVVRes &res = *bound_yylvv_res;
-    switch (key) {
+    switch (key)
+    {
         case GLFW_KEY_L:
             switch_state(res, ui_res, std::make_shared<LineGlyphRenderState>());
             break;
@@ -86,19 +94,23 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action, int mod
             switch_state(res, ui_res, std::make_shared<StreamLineRenderState>());
             break;
     }
-    if (ui_res.render_state) {
+
+    if (ui_res.render_state)
+    {
         ui_res.render_state->key_pressed(res, ui_res, key);
     }
 }
 
-void cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) {
+void cursor_pos_callback(GLFWwindow *window, double xpos, double ypos)
+{
     Camera &camera = bound_ui_res->camera;
 
     // ypos is (0, 0) at the bottom left corner and (w, h) at top right corner, thus it needs to be flipped
     // since right is actually our left (help me handedness,) we need to flip xpos as well
     ypos = -ypos;
     xpos = -xpos;
-    if (!camera.prev_cursor_pos) {
+    if (!camera.prev_cursor_pos)
+    {
         camera.prev_cursor_pos = glm::dvec2(xpos, ypos);
         return;
     }
@@ -110,7 +122,8 @@ void cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) {
     camera.update_components(bound_ui_res->screen_width, bound_ui_res->screen_height);
 }
 
-bool initialize_ui_resources(GLFWwindow *window, UIRes &res) {
+bool initialize_ui_resources(GLFWwindow *window, UIRes &res)
+{
     std::cout << "Initializing bounding box and bounding box program." << std::endl;
     const glm::vec3 a = glm::vec3(-0.5f, -0.5f, -0.5f),
                 b = glm::vec3(0.5f, -0.5f, -0.5f),
@@ -158,7 +171,8 @@ bool initialize_ui_resources(GLFWwindow *window, UIRes &res) {
     return true;
 }
 
-bool initialize_delta_wing_resources(YYLVVRes &res, UIRes &ui_res) {
+bool initialize_delta_wing_resources(YYLVVRes &res, UIRes &ui_res)
+{
     std::cout << "Evaluating delta wing bounding box and allocating graphics resources." << std::endl;
     ui_res.delta_wing_bounding_box = res.vf_tex.get_bounding_box();
     float x_min = 50.0f;
@@ -179,13 +193,15 @@ bool initialize_delta_wing_resources(YYLVVRes &res, UIRes &ui_res) {
                                    },
                                    GLDrawCall(GL_TRIANGLES, 0, 3));
     ui_res.delta_wing_program = Program::make_program("shaders/lines.vert", "shaders/delta.frag");
-    if (!ui_res.delta_wing_program || !ui_res.delta_wing_program->valid) {
+    if (!ui_res.delta_wing_program || !ui_res.delta_wing_program->valid)
+    {
         return false;
     }
     return true;
 }
 
-bool initialize_color_transfer_function(UIRes &ui_res) {
+bool initialize_color_transfer_function(UIRes &ui_res)
+{
     std::vector<float4> vector_magnitude_ctf;
     std::cout << "Initializing color transfer function for CUDA: creating device array." << std::endl;
     vector_magnitude_ctf.push_back(make_float4(0.4f, 0.6f, 0.9f, 1.0f)); // TODO: 1D texture is weird because it has a
@@ -218,33 +234,40 @@ bool initialize_color_transfer_function(UIRes &ui_res) {
     return true;
 }
 
-void handle_continuous_key_events(YYLVVRes &res, UIRes &ui_res) {
+void handle_continuous_key_events(YYLVVRes &res, UIRes &ui_res)
+{
     Camera &camera = ui_res.camera;
-    if (glfwGetKey(res.window, GLFW_KEY_W)) {
+    if (glfwGetKey(res.window, GLFW_KEY_W))
+    {
         camera.eye += camera.front * camera.speed * ui_res.delta_time;
         camera.update_components(ui_res.screen_width, ui_res.screen_height);
     }
-    if (glfwGetKey(res.window, GLFW_KEY_S)) {
+    if (glfwGetKey(res.window, GLFW_KEY_S))
+    {
         camera.eye -= camera.front * camera.speed * ui_res.delta_time;
         camera.update_components(ui_res.screen_width, ui_res.screen_height);
     }
-    if (glfwGetKey(res.window, GLFW_KEY_A)) {
+    if (glfwGetKey(res.window, GLFW_KEY_A))
+    {
         camera.eye -= camera.right * camera.speed * ui_res.delta_time;
         camera.update_components(ui_res.screen_width, ui_res.screen_height);
     }
-    if (glfwGetKey(res.window, GLFW_KEY_D)) {
+    if (glfwGetKey(res.window, GLFW_KEY_D))
+    {
         camera.eye += camera.right * camera.speed * ui_res.delta_time;
         camera.update_components(ui_res.screen_width, ui_res.screen_height);
     }
 }
 
-void update_delta_time(UIRes &res) {
+void update_delta_time(UIRes &res)
+{
     double this_instant = glfwGetTime();
     res.delta_time = (float) (this_instant - res.last_instant);
     res.last_instant = this_instant;
 }
 
-void align_camera(UIRes &ui_res) {
+void align_camera(UIRes &ui_res)
+{
     glm::vec3 extent = ui_res.delta_wing_bounding_box.extend(); // TODO: a typo
     float max_ext = glm::max(glm::max(extent.x, extent.y), extent.z);
     float init_dist = glm::max(extent.x, extent.y) * 0.5f * sqrt(3.0f);
@@ -255,7 +278,8 @@ void align_camera(UIRes &ui_res) {
     ui_res.camera.update_components(ui_res.screen_width, ui_res.screen_height);
 }
 
-void draw_delta_wing(UIRes &ui_res) {
+void draw_delta_wing(UIRes &ui_res)
+{
     // 1. Draw the bounding box (that we calculated)
     ui_res.bounding_box_program->use();
     glm::mat4 model = glm::translate(glm::mat4(1.0f), ui_res.delta_wing_bounding_box.center());
@@ -273,45 +297,55 @@ void draw_delta_wing(UIRes &ui_res) {
     ui_res.delta_wing_vao->draw();
 }
 
-void start_ui(YYLVVRes &res) {
+void start_ui(YYLVVRes &res)
+{
     GLFWwindow *window = res.window;
     print_controls();
     UIRes ui_res;
-    if (!initialize_ui_resources(window, ui_res)) {
+    if (!initialize_ui_resources(window, ui_res))
+    {
         std::cerr << "Things might not be rendered correctly: failed to initialize UI resources?" << std::endl;
     }
-    if (!initialize_delta_wing_resources(res, ui_res)) {
+    if (!initialize_delta_wing_resources(res, ui_res))
+    {
         std::cerr << "The delta wing might not be rendered: cannot initialize delta wing resources?" << std::endl;
     }
-    if (!initialize_color_transfer_function(ui_res)) {
+    if (!initialize_color_transfer_function(ui_res))
+    {
         std::cerr << "Cannot initialize color transfer function?" << std::endl;
     }
     std::cout << "Aligning camera." << std::endl;
     align_camera(ui_res);
-    while (!glfwWindowShouldClose(window)) {
+    while (!glfwWindowShouldClose(window))
+    {
         bound_ui_res = &ui_res;
         bound_yylvv_res = &res;
         glfwPollEvents();
         update_delta_time(ui_res);
         handle_continuous_key_events(res, ui_res);
-        if (ui_res.render_state) {
+        if (ui_res.render_state)
+        {
             ui_res.render_state->process_events(res, ui_res);
         }
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         draw_delta_wing(ui_res);
-        if (ui_res.render_state) {
+        if (ui_res.render_state)
+        {
             ui_res.render_state->render(res, ui_res);
         }
         glfwSwapBuffers(window);
     }
-    if (!cleanup_ui_resources(ui_res)) {
+    if (!cleanup_ui_resources(ui_res))
+    {
         std::cerr << "Cannot cleanup UI resources?" << std::endl;
     }
 }
 
-bool cleanup_ui_resources(UIRes &res) {
+bool cleanup_ui_resources(UIRes &res)
+{
     std::cout << "Cleaning up UI resources..." << std::endl;
-    if (res.render_state) {
+    if (res.render_state)
+    {
         res.render_state->destroy();
     }
     CHECK_CUDA_ERROR(cudaDestroyTextureObject(res.ctf_tex_cuda));

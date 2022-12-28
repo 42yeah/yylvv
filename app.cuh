@@ -61,6 +61,7 @@ public:
 
     // UI resources
     std::shared_ptr<VAO> bounding_box_vao;
+    std::shared_ptr<VAO> shadow_floor;
     std::shared_ptr<Program> bounding_box_program;
     Camera camera;
 
@@ -83,6 +84,7 @@ public:
     int visualization_mode;
     bool should_draw_bounding_box;
     bool should_draw_delta_wing;
+    bool should_draw_shadow;
 };
 
 #endif // APP_CUH
